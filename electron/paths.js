@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const platformPaths = require('./platform-paths');
 
 function appRoot() {
   if (process.resourcesPath) {
@@ -27,6 +28,9 @@ function appRoot() {
 }
 
 const api = {
+  resolvePaths: platformPaths.resolvePaths,
+  fileUrlOf: platformPaths.fileUrlOf,
+  fileUrlOfDir: platformPaths.fileUrlOfDir,
   appRoot: appRoot,
   scriptsDir: function () { return path.join(appRoot(), 'scripts'); },
   stateCore: function () { return path.join(api.scriptsDir(), 'state-core.js'); },

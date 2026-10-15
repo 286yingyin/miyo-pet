@@ -239,9 +239,9 @@ for (const t of TARGETS) {
     if (/dirPack/.test(code) && /\.plain/.test(code) && /packsRootUrl/.test(code))
       ok('多系列差分包：packs 目录 + plain 命名 + dirPack 跟踪（0.3.3 统一单值）');
     else bad('多系列差分包逻辑缺失');
-    if (/fallbackTried/.test(code) && /fallback\(lastSprId\)/.test(code))
-      ok('系列包缺图回退美代默认图（onerror，只兜一次）');
-    else bad('缺系列缺图回退');
+    if (/isForeignCharacter\(\)/.test(code) && /map\[lastCfg\.packDefaultId/.test(code))
+      ok('角色包缺图仅使用当前角色默认图');
+    else bad('缺当前角色缺图回退');
     if (/--sprite-h', target \+ 'px'/.test(code) && /naturalHeight \/ im\.naturalWidth/.test(code))
       ok('立绘高度自适应（按图片比例写 --sprite-h）');
     else bad('缺立绘高度自适应');
@@ -257,9 +257,9 @@ for (const t of TARGETS) {
     if (/cfg\.packUrl && typeof cfg\.packUrl\.v1/.test(code))
       ok('系列包走主进程解析的 packUrl（外部根 → 内置兜底，便携版/绿色版都支持）');
     else bad('系列包未接 packUrl');
-    if (/MAP\[k\]\.sprs = \['01'\]/.test(code))
-      ok('换学生后所有默认差分重置为 01');
-    else bad('缺换学生重置 01');
+    if (/cfg\.packDefaultId && cfg\.packDefaultId\[VER\] \|\| idsOf\(\)\[0\]/.test(code))
+      ok('角色默认映射来自自己的默认或首个差分');
+    else bad('缺角色自身默认差分');
     /* 0.3.6：台本合并（v1/v2 统一 v2）+ 胶囊位置/大小 */
     if (/cleanLineMap\(cfg\.lines && cfg\.lines\.v2\)/.test(code) &&
         /cleanReactMap\(cfg\.reacts && cfg\.reacts\.v2, idsOf\(\)\)/.test(code) &&
@@ -273,9 +273,9 @@ for (const t of TARGETS) {
       ok('胶囊位置/大小可调（--pill-dx/--pill-dy/--pill-scale）');
     else bad('缺胶囊位置/大小变量');
     /* 0.3.11：缺号三级回退 + 语音文件夹 */
-    if (/fallbackTried = '00'/.test(code))
-      ok('缺号三级回退：系列包缺号 → 美代同编号 → 00 号');
-    else bad('缺缺号三级回退');
+    if (/ticket !== spriteGeneration \|\| generation !== characterGeneration/.test(code) && /tried\.has/.test(code))
+      ok('图片异步加载过滤过期角色回调并避免回退循环');
+    else bad('缺图片代数检查或回退循环保护');
     if (/lastCfg\.voiceMap && lastCfg\.voiceMap\[p\]/.test(code) || /lastCfg\.voiceMap/.test(code))
       ok('语音文件夹：纯文件名走 voiceMap（packs/voice，免后缀，仅 ogg）');
     else bad('语音 voiceMap 解析缺失');
@@ -351,17 +351,17 @@ for (const t of TARGETS) {
 /* ---------- 打包脚本：网页端导出 ---------- */
 console.log('\n--- scripts/build-exe.js / build-portable.js（网页端导出） ---');
 {
-  const bx = fs.readFileSync(path.join(ROOT, 'scripts', 'build-exe.js'), 'utf8');
-  const bp = fs.readFileSync(path.join(ROOT, 'scripts', 'build-portable.js'), 'utf8');
-  if (/settings\.html/.test(bx) && /__WEB_VERSION__/.test(bx) && /__WEB_ONLY__/.test(bx))
-    ok('build-exe 导出网页端（版本 + WEB_ONLY 注入）');
-  else bad('build-exe 缺网页端导出');
-  if (/miyo-web/.test(bx) && /full_low/.test(bx)) ok('build-exe 附带 miyo-web 资源副本');
-  else bad('build-exe 缺 miyo-web 资源附带');
-  if (/settings\.html/.test(bp) && /miyo-web/.test(bp)) ok('build-portable 附带 miyo-web 资源副本');
-  else bad('build-portable 缺 miyo-web 资源附带');
-  if (/settings\.html/.test(bp) && /__WEB_ONLY__/.test(bp)) ok('build-portable 同步导出网页端（WEB_ONLY）');
-  else bad('build-portable 缺网页端导出');
+  const output = fs.mkdtempSync(path.join(require('os').tmpdir(), 'miyo-check-export-'));
+  try {
+    require('./build-support').exportWeb(ROOT, output);
+    const web = fs.readFileSync(path.join(output, 'settings.html'), 'utf8');
+    const version = require('../electron/package.json').version;
+    if (web.includes("var WEB_VERSION = '" + version + "'") && web.includes('var WEB_ONLY = true')) ok('共享网页导出：版本与 WEB_ONLY 注入');
+    else bad('共享网页导出注入缺失');
+    if (fs.existsSync(path.join(output, 'miyo-web/v2/assets/full_low/00.png')) && fs.existsSync(path.join(output, 'packs/miyo/manifest.json'))) ok('共享网页导出：内置差分与 miyo-web');
+    else bad('共享网页导出资源缺失');
+  } catch (error) { bad('网页导出失败：' + error.message); }
+  finally { fs.rmSync(output, { recursive: true, force: true }); }
 }
 
 /* ---------- 设置窗口 ---------- */
@@ -613,17 +613,36 @@ checkModule('scripts/task-status.js', [
   ['保留旧导出', /module\.exports[\s\S]*snapshot/]
 ]);
 
+checkModule('electron/platform-paths.js', []);
+checkModule('electron/character-packs.js', [
+  ['异步统一包发现', /async function discoverPacks/],
+  ['差分兼容 png 与 jpg', /jpe\?g/],
+  ['原始 spr 命名兼容', /spr_\(\.\+\)/],
+  ['深度受限递归扫描', /if \(depth > 3\)/],
+  ['中文旧目录生成稳定身份', /'legacy:' \+ encodeURIComponent\(name\)/],
+  ['校验真实路径防越界', /fs\.realpath/]
+]);
+checkModule('electron/config-store.js', [
+  ['schema 2 迁移', /function migrateConfig/],
+  ['原样备份在解析前', /file\+'\.bak'[\s\S]*JSON\.parse\(bytes/],
+  ['串行同目录临时文件原子替换', /previous\.catch[\s\S]*fs\.rename\(temp,key\)/],
+  ['保存绑定角色与 revision', /request\.characterId!==config\.activeCharacterId[\s\S]*request\.baseRevision!==config\.revision/]
+]);
+
 checkModule('electron/paths.js', [
   ['应用根解析 appRoot', /function appRoot/],
   ['兼容 app-root / 目录版两种布局', /app-root/]
 ]);
 
+checkModule('scripts/agents/schema.js', []);
+checkModule('scripts/agents/hub.js', []);
+checkModule('scripts/agents/workbuddy.js', []);
+checkModule('scripts/agents/codex.js', []);
+checkModule('scripts/codex-event.js', []);
+
 checkModule('electron/main.js', [
-  ['引用状态内核', /require\(paths\.stateCore\(\)\)/],
-  ['fs.watch 监听', /fs\.watch/],
-  ['去抖窗口', /COALESCE_MS/],
-  ['兜底轮询', /POLL_MS/],
-  ['会话切换重建 watcher', /ensureWatchers/],
+  ['统一 Agent hub', /createHub/],
+  ['独立整点定时器', /hourlyTimer = setInterval/],
   ['变化记录落盘', /changeLog\.createLog/],
   ['历史 IPC', /history-tail/],
   ['统计范围菜单', /统计范围/],
@@ -636,29 +655,25 @@ checkModule('electron/main.js', [
   ['restSprs→idleSprs 迁移', /legacy\[mode\]/],
   ['idleBlink/idleSway 默认（0.2.16 闲置特效）', /idleBlink: \{ v1: \{\}, v2: \{\} \}/],
   ['idleBreathe 默认（0.2.17 呼吸）', /idleBreathe: \{ v1: \{\}, v2: \{\} \}/],
-  ['气泡外观字段默认（0.3.1）', /name: '美代', scale: 1, nameScale: 1,/],
+  ['气泡外观默认使用当前角色名称', /name: cfg\.characterLabel \|\| '', scale: 1, nameScale: 1,/],
   ['省内存立绘默认开（0.3.1）', /cfg\.lowMem = cfg\.lowMem !== false/],
   ['检测开关默认（0.3.2）', /detect: \{ enabled: true, approval: true, working: true, pending: true \}/],
   ['差分系列默认单值（0.3.3）', /series: 'miyo',/],
   ['缩放上限 5×（0.3.10）', /MAX_SCALE = 5;/],
-  ['差分图片支持 jpg（0.3.10 kayako 场景）', /jpe\?g/],
-  ['原始命名兼容（0.3.7/0.3.9 extractSpriteId）', /extractSpriteId/],
   ['便携版外部根（0.3.5）', /PORTABLE_EXECUTABLE_DIR/],
-  ['packUrl 按版本解析（0.3.5）', /packDirOf/],
-  ['系列目录名放行中文（0.3.8）', /function isSafePackName/],
+  ['packUrl 从统一角色描述符解析', /cfg\.packUrl\[v\] = fileUrlOfDir\(mode\.rootDir\)/],
   ['语音 voiceRootUrl 兜底（0.3.11/0.3.13）', /cfg\.voiceRootUrl/],
-  ['voiceRoot 计算（0.3.11/0.3.13）', /cfg\.voiceRoot = voiceRoot/],
-  ['voiceMap 免后缀映射（0.3.13 packs/voice）', /cfg\.voiceMap = voiceMap/],
-  ['递归深度扫描（0.3.9 根级/嵌套/zip）', /walkPackPngs/],
+  ['voiceRoot 来自当前角色语音目录', /cfg\.voiceRoot = voiceDirs\.find/],
+  ['voiceMap 当前角色免后缀映射', /cfg\.voiceMap\[f\.replace/],
   ['zip 自动解压（0.3.9）', /extractExternalZips/],
-  ['每差分完整 URL（0.3.9）', /cfg\.packFileUrl = \{ v1: pv1\.urls, v2: pv2\.urls \}/],
+  ['当前角色绝对路径统一转标准 URL', /cfg\.packFileUrl\[v\] = Object\.fromEntries[\s\S]*paths\.fileUrlOf\(file\)/],
   ['10× 无屏幕钳制（0.3.9 底部锚定出屏）', /10× 的预期行为/],
-  ['packIds/packFiles 扫描（0.3.3/0.3.7）', /scanPack/],
+  ['包发现只有一个注册表', /packRegistry = await packs\.discoverPacks/],
   ['外部 packs 根（0.3.3 exe 同目录）', /packsRootUrl/],
-  ['换学生重置映射（0.3.3/0.3.5 不切倍率）', /cfg\.series !== prevSeries/],
+  ['角色切换使用独立配置并先提交后发布', /store\.switchCharacter[\s\S]*publishConfig\(candidate\)/],
   ['pillPos 默认清洗（0.3.6 胶囊位置/大小）', /cfg\.pillPos\.scale = clampNum/],
   ['整点台本统一 v2（0.3.6）', /cfg\.hourly && cfg\.hourly\.v2/],
-  ['packs-list 带 ids/urls（0.3.6/0.3.9 图库浏览）', /out\.push\(\{ dir: d, label: label, ids: Object\.keys\(urls\)\.sort\(\), urls: urls \}\)/],
+  ['packs-list 与加载共享注册表及编号 URL', /for \(const pack of packRegistry\)[\s\S]*ids: Object\.keys\(mode\.sprites\)[\s\S]*urls: Object\.fromEntries/],
   ['packs-list IPC（0.3.2）', /packs-list/],
   ['pillText 字符串清洗（0.2.16 胶囊文案）', /cfg\.pillText\[k\] = cfg\.pillText\[k\]\.slice\(0, 120\)/],
   ['今日积分：miyo-credits 推送（0.2.14）', /send\('miyo-credits'/],

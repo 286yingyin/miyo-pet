@@ -373,6 +373,7 @@
         <div class="pill idling off" id="pillIdle">
           <span class="dot"></span><span id="tIdleA">已空闲 </span><span class="num" id="nIdle">0</span><span id="tIdleB"> 秒</span>
         </div>
+        <div class="pill" id="pillAgent"><span id="agentStatus">WorkBuddy · 尚未接入</span></div>
         <div class="pill convs" id="pillCredits" title="今日消耗的 WorkBuddy 积分（每小时自动刷新）">
           <span class="dot"></span><span id="tCreditsA">今日积分 </span><span class="num" id="nCredits">—</span><span id="tCreditsB"></span>
         </div>
@@ -531,13 +532,13 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
        会解析到 v2/assets/spr/（不存在）→ 切 v1 全部 404 → 桌宠隐形（0.2.1 事故）。
        check.js 有回归护栏。 */
     /* 0.3.2 多系列：plain=true = 系列包（文件名 = <id>.png，见 packs/<系列>/）；
-       dirPack 记录当前系列；缺图（onerror）回退美代默认图（fallback）。 */
+       dirPack 记录当前角色；外部角色缺图只在自己的素材中回退。 */
     v1: { dir: '../v1/assets/spr/', plain: false, dirPack: 'miyo',
           /* 0.3.7：系列包文件名经 packFiles 映射（兼容原始 *_spr_XX 命名） */
           file: function (id) {
             if (!this.plain) return this.dir + 'CH0317_spr_' + id + '.png';
             const u = packFile('v1', id);
-            return /^file:/i.test(u) ? u : this.dir + u;
+            return /^(file:|https?:|data:|blob:)/i.test(u) ? u : u ? this.dir + u : '';
           },
           fallback: function (id) { return '../v1/assets/spr/CH0317_spr_' + id + '.png'; },
           ids: idList(['99', 'Idle_01']) },                       // 40 张
@@ -549,7 +550,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
           file: function (id) {
             if (!this.plain) return this.dir + id + '.png';
             const u = packFile('v2', id);
-            return /^file:/i.test(u) ? u : this.dir + u;
+            return /^(file:|https?:|data:|blob:)/i.test(u) ? u : u ? this.dir + u : '';
           },
           fallback: function (id) { return './assets/' + (LOWMEM ? 'full_low' : 'full') + '/' + id + '.png'; },
           ids: idList(['99', 'Eye_Close_01', 'Idle_01']) }        // 41 张
@@ -557,9 +558,12 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   var LOWMEM = true;                     // 省内存立绘开关（cfg.lowMem，默认开）
   /* 0.3.9：系列包「编号 → 完整 file:// URL」（cfg.packFileUrl，主进程递归扫描生成）；
      无映射时回退「目录 + 文件名映射 / <编号>.png」（旧结构兼容） */
+  function isForeignCharacter() { return !!(lastCfg && (lastCfg.characterId || lastCfg.series) && (lastCfg.characterId || lastCfg.series) !== 'miyo'); }
+  var characterGeneration = 0;
   function packFile(ver, id) {
     const um = lastCfg.packFileUrl && lastCfg.packFileUrl[ver];
     if (um && um[id]) return um[id];
+    if (isForeignCharacter()) return um && (um[lastCfg.packDefaultId && lastCfg.packDefaultId[ver]] || um[Object.keys(um).sort()[0]]) || '';
     const fm = lastCfg.packFiles && lastCfg.packFiles[ver];
     return (fm && fm[id]) || (id + '.png');
   }
@@ -568,7 +572,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
       'miyo'（无 packIds）走内置美代清单。 */
   function idsOf() {
     var p = lastCfg.packIds && lastCfg.packIds[VER];
-    return (p && p.length) ? p : VERSETS[VER].ids;
+    return isForeignCharacter() ? (p || []) : (p && p.length) ? p : VERSETS[VER].ids;
   }
   function src(id) { return VERSETS[VER].file(id); }
   function nameOf(id) { return id === 'Idle_01' ? '待机' : id; }
@@ -645,6 +649,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   /* 内置台词模板：{processing} 等占位符由 fillVars 替换。
      模板本身会经「内置台词上报」给设置页展示，改这里即可同步两处。 */
   function lineTplFor(mode, s) {
+    if (isForeignCharacter()) return '';
     switch (mode) {
       case 'approval':
         return (s.approval > 1 ? '有 {approval} 个操作' : '有个操作')
@@ -806,6 +811,12 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   }
 
   function resolveMode(s) {
+    if (s.normalizedAgent) {
+      if (s.phase === 'failed') return 'error';
+      if (s.phase === 'awaiting_approval' && showApproval && (lastCfg.detect || {}).approval !== false) return 'approval';
+      if (s.phase === 'awaiting_input') return 'pending';
+      if (s.phase === 'running' && s.pending <= 0 && (lastCfg.detect || {}).working !== false) return 'processing';
+    }
     if (s.error) return 'error';                              // 连续读不到状态 → 明确的错误态
     if (showApproval && s.approval > 0) return 'approval';    // 权限待批准：优先级最高
     if (s.pending > 0) return 'pending';                      // 待办（语义已收窄，不代表权限）
@@ -846,29 +857,34 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   /* 直接换 src，无任何淡入淡出（0.2.3）：
      旧版「先淡出 170ms 再换图」会让唯一可见层整层透明 ~350ms = 轮播时桌宠消失。
      轮播候选图已由 prefetchMapped() 预进缓存，直换瞬时完成。 */
-  var lastSprId = null, fallbackTried = false, lastSpriteH = 0;
+  var lastSprId = null, lastSpriteH = 0;
+  var spriteGeneration = 0;
   function setBaseSrc(url, id) {
     if (lastSrc === url) return;
-    lastSrc = url;
-    /* 0.3.2：记录当前差分 id —— 系列包缺图时 onerror 回退美代默认图 */
-    lastSprId = id || null;
-    fallbackTried = 'id';          // '' 起步 → 缺号回美代('id') → 仍缺回 00
-    els.layerBase.src = url;
+    lastSrc = url; lastSprId = id || null;
+    const ticket = ++spriteGeneration, generation = characterGeneration;
+    if (!url) { els.layerBase.removeAttribute('src'); return; }
+    const tried = new Set();
+    function load(candidate) {
+      if (!candidate || tried.has(candidate)) { els.layerBase.removeAttribute('src'); return; }
+      tried.add(candidate);
+      const image = new Image();
+      image.onload = function () {
+        if (ticket !== spriteGeneration || generation !== characterGeneration) return;
+        els.layerBase.src = candidate;
+      };
+      image.onerror = function () {
+        if (ticket !== spriteGeneration || generation !== characterGeneration) return;
+        if (isForeignCharacter()) {
+          const map = lastCfg.packFileUrl && lastCfg.packFileUrl[VER] || {};
+          const options = [map[lastCfg.packDefaultId && lastCfg.packDefaultId[VER]]].concat(Object.keys(map).sort().map(k => map[k]));
+          load(options.find(u => u && !tried.has(u)));
+        } else load(VERSETS[VER].fallback('00'));
+      };
+      image.src = candidate;
+    }
+    load(url);
   }
-  /* 系列包缺图兜底：回退美代默认图（fallback），只兜一次防循环 */
-  els.layerBase.addEventListener('error', function () {
-    /* 0.3.11：缺号三级回退 —— 系列包缺号 → 美代同编号 → 仍缺 → 00 号（老师要求） */
-    if (!lastSprId || !fallbackTried) return;
-    if (fallbackTried === 'id' && VERSETS[VER] && VERSETS[VER].plain) {
-      fallbackTried = 'miyo';
-      els.layerBase.src = VERSETS[VER].fallback(lastSprId);
-      return;
-    }
-    if ((fallbackTried === 'id' || fallbackTried === 'miyo') && lastSprId !== '00') {
-      fallbackTried = '00';
-      els.layerBase.src = VERSETS[VER].fallback('00');
-    }
-  });
   /* 0.3.2 立绘高度自适应：不同学生比例不同（美代 1:2.74 / 渚 1:1.49 / 优香 1:2.47），
      按图片实际比例算理想高度，夹在 [minH, 默认高度] 内写 --sprite-h；
      高度变化 >16px 才生效（防同包内微小差异抖动），并重排气泡。 */
@@ -961,7 +977,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     react = {
       sprs: sprs.slice(),
       line: lines.length ? fillVars(lines[(cycle[mode] || 0) % lines.length], state, { hour: p.hour })
-                         : fillVars('……{hour} 点整了，老师。', state, { hour: p.hour != null ? p.hour : '' }),
+                         : fillVars(isForeignCharacter() ? '' : '……{hour} 点整了，老师。', state, { hour: p.hour != null ? p.hour : '' }),
       until: Date.now() + (p.ms || 12000),
       pick: 0,
       chime: true,
@@ -991,7 +1007,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     react = {
       sprs: sprs,
       line: lines.length ? fillVars(lines[0], state, { hour: p.hour })
-                         : '（预览）……老师在看效果。',
+                         : (isForeignCharacter() ? '' : '（预览）……老师在看效果。'),
       until: Date.now() + (p.ms || 3000),
       pick: 0,
       chime: true,
@@ -1146,6 +1162,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
      ======================================================= */
   function defaultReminderScript(r) {
     var name = (r && r.name) ? r.name : '待办事项';
+    if (isForeignCharacter()) return { weight: 1, voice: null, lines: [{ text: name, spr: null, sec: 4 }] };
     return { weight: 1, voice: null, lines: [
       { text: '老师，提醒时间到了。', spr: null, sec: 4 },
       { text: '「' + name + '」——别忘了哦。', spr: null, sec: 4 },
@@ -1153,6 +1170,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     ] };
   }
   function defaultAckScript() {
+    if (isForeignCharacter()) return { weight: 1, voice: null, lines: [{ text: '', spr: idsOf()[0] || null, sec: 1 }] };
     return { weight: 1, voice: null, lines: [
       { text: '收到啦，那我就放心了。', spr: null, sec: 3 },
       { text: '那就继续加油吧，老师。', spr: null, sec: 3 }
@@ -1199,7 +1217,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     if (!(HOSTED && LAST_CFG && window.petHost && typeof window.petHost.saveConfig === 'function')) return;
     try {
       LAST_CFG.reminders = JSON.parse(JSON.stringify(REMINDERS));
-      window.petHost.saveConfig(LAST_CFG);
+      window.petHost.saveConfig({ characterId: LAST_CFG.characterId, baseRevision: LAST_CFG.revision, patch: { reminders: LAST_CFG.reminders } });
     } catch (e) { /* 忽略：保存失败只影响断电后的去重，不影响播报 */ }
   }
   function finishReminder() {
@@ -1263,8 +1281,12 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   function voiceSrc(p) {
     p = String(p || '').trim();
     if (!p) return '';
-    if (/^file:/i.test(p)) return encodeURI(p);
-    if (/^[a-zA-Z]:[\\/]/.test(p)) return 'file:///' + encodeURI(p.replace(/\\/g, '/'));
+    if (/^file:/i.test(p)) return p;
+    if (/^[a-zA-Z]:[\\/]/.test(p) || /^\//.test(p)) {
+      if (window.petHost && typeof window.petHost.fileUrlOf === 'function') {
+        return window.petHost.fileUrlOf(p);
+      }
+    }
     /* 0.3.13：纯文件名 → voice 文件夹映射（packs/voice 优先，免后缀，仅 ogg）；
        未命中映射时回退 voiceRootUrl 拼接 */
     if (!/[\\/]/.test(p)) {
@@ -1276,7 +1298,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
         if (vm[base]) return vm[base];
       }
       const vr = lastCfg.voiceRootUrl;
-      if (vr) return vr + encodeURI(p);
+      if (vr) return vr + encodeURIComponent(p);
     }
     try { return new URL(p, location.href).href; } catch (e) { return p; }
   }
@@ -1311,6 +1333,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   }
 
   /* ---------- 胶囊显隐（设置里可逐项关掉；关掉 = 整行消失） ---------- */
+  var creditsAvailable = false;
   var pillVisible = { working: true, asking: true, idle: true, conversations: true, scope: true, credits: true };
 
   /* ---------- 胶囊文案自定义（0.2.16）：cfg.pillText ----------
@@ -1337,14 +1360,14 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   Object.keys(PILL_TEXT_DEF).forEach(function (k) { PILL_TEXT[k] = splitPillTpl(PILL_TEXT_DEF[k]); });
 
   function applyPillVisible() {
-    els.pillWorking.classList.toggle('hide', pillVisible.working === false);
-    els.pillAsking.classList.toggle('hide', pillVisible.asking === false);
+    els.pillWorking.classList.toggle('hide', pillVisible.working === false || (state.normalizedAgent && state.counts.processing === null));
+    els.pillAsking.classList.toggle('hide', pillVisible.asking === false || (state.normalizedAgent && state.counts.pending === null));
     els.pillIdle.classList.toggle('hide', pillVisible.idle === false);
-    els.pillConvs.classList.toggle('hide', pillVisible.conversations === false);
-    els.pillApproval.classList.toggle('hide', showApproval === false);
-    els.pillCredits.classList.toggle('hide', pillVisible.credits === false);
+    els.pillConvs.classList.toggle('hide', pillVisible.conversations === false || (state.normalizedAgent && state.provider !== 'workbuddy'));
+    els.pillCredits.classList.toggle('hide', pillVisible.credits === false || (state.normalizedAgent && (state.provider !== 'workbuddy' || state.phase === 'unknown')) || creditsAvailable === false);
     /* 统计范围胶囊也可隐藏（0.2.3 起，老师要求归入显示指标）；
        隐藏后切换口径走设置页的「统计范围」分段选择。 */
+    els.pillApproval.classList.toggle('hide', !showApproval || (state.normalizedAgent && state.counts.approval === null));
     els.pillScope.classList.toggle('hide', pillVisible.scope === false);
   }
 
@@ -1526,6 +1549,17 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     els.scopeText.textContent = allScope ? '全部会话（含历史）' : '仅当前会话';
     els.pillScope.classList.toggle('alerting', allScope);
     applyPillVisible();
+    var agentLabel = document.getElementById('agentStatus');
+    if (agentLabel && state.normalizedAgent) {
+      var healthLabels = { ready: '已接入', unconfigured: '尚未接入', stale: '读取降级', error: '来源异常' };
+      var phaseLabels = { running: '处理中', awaiting_approval: '等待批准', awaiting_input: '等待您输入', completed: '已完成', interrupted: '已中断', failed: '任务失败', idle: state.pending > 0 ? '有待办任务' : '待机' };
+      if (state.provider === 'codex') {
+        phaseLabels.running = '回合进行中，无法细分等待';
+        phaseLabels.unknown = '状态未知';
+      }
+      agentLabel.textContent = (state.provider === 'codex' ? 'Codex' : 'WorkBuddy') + ' · ' +
+        (state.note === 'disabled' ? '已关闭采集' : (healthLabels[state.health] || '') + ' · ' + (phaseLabels[state.phase] || '等待配置'));
+    }
 
     els.pet.setAttribute('data-degraded', state.degraded ? '1' : '0');
     els.pet.setAttribute('data-remind', activeReminder ? activeReminder.phase : '0');
@@ -1551,6 +1585,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
                         ['pending', 'approval', 'error'].indexOf(mode) < 0);
     if (state.bubble !== false && !bubbleSilent) {
       var btxt = live ? (live.line || lineOf(mode)) : lineOf(mode);
+      if (state.normalizedAgent && state.phase === 'awaiting_input' && (!live || !live.kind)) btxt = '正在等待您输入。';
       if (!btxt) {
         /* 0.3.19：无台词（含废弃的默认 idle 台词已删）→ 气泡静默 */
         els.bubble.classList.remove('show');
@@ -1623,13 +1658,14 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   var blinkTimer = null;
   function scheduleBlink() {
     if (blinkTimer) clearTimeout(blinkTimer);
+    const generation = characterGeneration;
     blinkTimer = setTimeout(function () {
       /* 0.2.16：只要眨眼层有图就眨 —— 是否有图由 render 按状态决定
          （待机眨眼配置 / MAP.blink），这里不再重复判断 MAP 条件；
          间隔：配置驱动（cfg.idleBlink.ms）或默认随机节奏。 */
-      if (els.layerBlink.hasAttribute('src')) {
+      if (generation === characterGeneration && els.layerBlink.hasAttribute('src')) {
         els.layerBlink.classList.add('on');
-        setTimeout(function () { els.layerBlink.classList.remove('on'); }, 105 + Math.random() * 70);
+        setTimeout(function () { if (generation === characterGeneration) els.layerBlink.classList.remove('on'); }, 105 + Math.random() * 70);
       }
       scheduleBlink();
     }, blinkPeriodMs ? blinkPeriodMs : 2600 + Math.random() * 3800);
@@ -1640,8 +1676,10 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
      ======================================================= */
   function touch() { lastActivity = Date.now(); idleOffset = 0; }
 
+  var seenCompletions = new Set();
   function setState(patch) {
     if (!patch || typeof patch !== 'object') return;
+    patch = Object.assign({}, patch);
 
     /* rev 单调闸：宿主 IPC 带 rev；开发态 status.json 不带 rev 就放行。
        作用：陈旧来源不会覆盖更新的来源。 */
@@ -1662,6 +1700,16 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
       if (det.approval === false) patch.approval = 0;
     }
 
+    if (patch.normalizedAgent) {
+      if (state.provider !== patch.provider || state.sessionId !== patch.sessionId ||
+          patch.phase === 'unknown' || patch.phase === 'interrupted' || patch.phase === 'failed' || patch.health !== 'ready') {
+        state.done = false; doneUntil = 0;
+      }
+      state.normalizedAgent = true; state.provider = patch.provider; state.health = patch.health;
+      state.phase = patch.phase; state.sessionId = patch.sessionId; state.counts = patch.counts;
+      state.note = patch.reason || '';
+      if (det.enabled === false) state.phase = 'unknown';
+    }
     var before = state.processing + state.pending;
     if (typeof patch.processing === 'number') state.processing = Math.max(0, Math.floor(patch.processing));
     if (typeof patch.pending === 'number') state.pending = Math.max(0, Math.floor(patch.pending));
@@ -1680,13 +1728,17 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     if (typeof patch.showApproval === 'boolean') showApproval = patch.showApproval;
 
     /* 完成态：优先信主进程的 justDone（它只在「健康快照」上置位） */
-    if (patch.justDone === true) { state.done = true; doneUntil = Date.now() + 8000; }
+    if (patch.normalizedAgent) {
+      if (det.enabled !== false && patch.health === 'ready' && patch.phase === 'completed' && patch.completionKey && !seenCompletions.has(patch.completionKey)) {
+        seenCompletions.add(patch.completionKey); state.done = true; doneUntil = Date.now() + 8000;
+      }
+    } else if (patch.justDone === true) { state.done = true; doneUntil = Date.now() + 8000; }
 
     var after = state.processing + state.pending;
     if (after !== before) {
       touch();
       /* 只有健康快照才允许用计数推断完成 —— 避免「读失败」被误判成「做完了」 */
-      if (!patch.degraded && patch.ok !== false) {
+      if (!patch.normalizedAgent && !patch.degraded && patch.ok !== false) {
         state.done = (before > 0 && after === 0);
         doneUntil = state.done ? Date.now() + 8000 : 0;
       }
@@ -1709,7 +1761,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
         approval: state.approval, completed: state.completed,
         conversations: state.conversations, scope: state.scope,
         ok: state.ok, degraded: state.degraded, error: state.error,
-        rev: lastRev, idleSec: idleSeconds()
+        rev: lastRev, idleSec: idleSeconds(), provider: state.provider, health: state.health, phase: state.phase, counts: state.counts, done: state.done
       };
     },
     getMode: function () { return resolveMode(state); },
@@ -1959,6 +2011,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
       每张差分一行：首行带内置台词，其余行空台词（回内置台词机制不触发，
       这里直接空字符串显示 —— 差分切换时静默）。 */
   function defaultReactScript(kind, streak) {
+    if (isForeignCharacter()) return null;
     var d = REACT[kind];
     if (!d) return null;
     if (Array.isArray(d)) {
@@ -2134,9 +2187,10 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
      12. 宿主配置（表情映射 + 显示大小）
      ======================================================= */
   function applyConfig(cfg) {
+    if (cfg && Number.isFinite(cfg.revision) && Number.isFinite(lastCfg.revision) && cfg.revision < lastCfg.revision) return;
     lastCfg = cfg || {};
     if (!cfg || typeof cfg !== 'object') return;
-    if (typeof cfg.scale === 'number' && cfg.scale >= 0.4 && cfg.scale <= 2.5) {
+    if (typeof cfg.scale === 'number' && cfg.scale >= 0.5 && cfg.scale <= 5) {
       /* 0.3.9：--pet-scale 直接用 cfg.scale（窗口允许超出屏幕，底部锚定，
          超大尺寸时上半身出屏 = 10× 的预期行为） */
       document.documentElement.style.setProperty('--pet-scale', String(cfg.scale || 1));
@@ -2166,9 +2220,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
        file URL 放 cfg.packsRootUrl）；内置 miyo 仍走原资源目录。
        目录名白名单（ASCII），防路径穿越。 */
     /* 0.3.8：系列目录名放行中文（isSafePackName 同款规则，主进程已校验，这里兜底） */
-    var s1 = (typeof cfg.series === 'string' && cfg.series && cfg.series === cfg.series.trim() &&
-              cfg.series.length <= 60 && !/[\\/:*?"<>|]/.test(cfg.series) &&
-              cfg.series.indexOf('..') < 0) ? cfg.series : 'miyo';
+    var s1 = cfg.characterId || cfg.series || 'miyo';
     var seriesChanged = (s1 !== VERSETS.v1.dirPack);
     VERSETS.v1.dirPack = s1;
     VERSETS.v2.dirPack = s1;
@@ -2306,6 +2358,10 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
       ? cfg.scriptRestMs : 60000;
     if (typeof cfg.volume === 'number' && isFinite(cfg.volume)) volume = Math.min(1, Math.max(0, cfg.volume));
 
+    MAP = JSON.parse(JSON.stringify(MAP_DEFAULTS[VER]));
+    if (isForeignCharacter()) Object.keys(MAP).forEach(function (key) {
+      MAP[key] = { sprs: [cfg.packDefaultId && cfg.packDefaultId[VER] || idsOf()[0]].filter(Boolean), blink: '', blinkOn: false };
+    });
     var m = cfg.mapping && cfg.mapping[VER];
     if (m) {
       Object.keys(m).forEach(function (k) {
@@ -2314,14 +2370,19 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
         if (arr.length) { MAP[k].sprs = arr; cycle[k] = 0; }
       });
     }
-    /* 0.3.3 换学生：所有默认差分一律重置为 01 —— 美代专属 id（Idle_01 等）在其他
-       学生包里不存在，沿用会造成缺图回退混搭；mapping 已由主进程在切换时清空。 */
     if (seriesChanged) {
-      Object.keys(MAP).forEach(function (k) { MAP[k].sprs = ['01']; });
-      cycle = {};
-      /* 正在播的台本0 持有旧差分行 → 强制重估（新台本按重置后的 MAP 生成） */
-      scriptSession = null; react = null;
-      scriptsDirty = true; __lastScripts = '';
+      characterGeneration++;
+      spriteGeneration++;
+      els.layerBase.removeAttribute('src');
+      els.layerBlink.removeAttribute('src');
+      els.layerBlink.classList.remove('on');
+      if (voiceAudio) { voiceAudio.pause(); voiceAudio.currentTime = 0; voiceAudio = null; }
+      lastVoiceKey = '';
+      if (bubbleTimer) clearTimeout(bubbleTimer);
+      els.bubbleText.textContent = '';
+      scriptSession = null; react = null; activeReminder = null;
+
+      scriptsDirty = true; __lastScripts = ''; cycle = {};
     }
 
     if (verChanged || packChanged) {
@@ -2562,6 +2623,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     if (typeof window.petHost.onCredits === 'function') {
       window.petHost.onCredits(function (c) {
         if (!c || !els.nCredits) return;
+        creditsAvailable = !!c.ok; applyPillVisible();
         if (c.ok) {
           els.nCredits.textContent = String(c.today);
           els.pillCredits.title = '今日消耗 ' + c.today + ' · 累计 ' + c.total +
