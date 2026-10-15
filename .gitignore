@@ -1,0 +1,26 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-single/
+dist-builder/
+dist-stage*/
+*.log
+
+# 本地基线 / 临时 / 本机数据
+_baseline/
+.tmp/
+.workbuddy/
+
+# 其他学生素材与派生图标（版权限制，不入库）
+其他学生差分/
+测试用音频文件/
+图标文件/
+prototype/v1/packs/
+prototype/v2/packs/
+
+# 本地约定目录（用户自行放置语音/差分，不入库）
+voice/
+packs/
+
+# Spine 骨骼数据（NEXON 素材，不入库；运行时 spine-webgl.js 保留）
+prototype/v2/assets/spine/

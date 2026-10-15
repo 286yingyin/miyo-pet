@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美代差分立绘 · 情感标签工具</title>
+<!--
+  差分立绘情感标签工具
+  用途：逐张为 40 张差分打情感标签，导出 JSON 交给助手配置桌宠状态映射
+  素材：kivo.wiki / CH0317_spr_*.png（素材版权归 NEXON Games 及官方所有，仅供个人使用，请勿用于商业目的。）
+-->
+<style>
+  :root{
+    --bg:#eef2f7; --card:#fff; --ink:#1e2430; --ink2:#5a6473; --ink3:#8d97a6;
+    --line:#e2e7ef; --miyo:#7fc98f; --miyo-deep:#4f9c66; --miyo-soft:#eaf7ee;
+    --warn:#d99a3c; --radius:12px;
+    --shadow:0 1px 2px rgba(24,38,60,.05), 0 6px 18px rgba(24,38,60,.06);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei",system-ui,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--ink); font-size:13.5px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  header{
+    position:sticky; top:0; z-index:20; background:rgba(238,242,247,.94);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+    padding:16px 24px 14px;
+  }
+  h1{margin:0; font-size:17px; font-weight:700;}
+  .sub{color:var(--ink3); font-size:12.5px; margin-top:3px;}
+  .actions{display:flex; gap:9px; flex-wrap:wrap; margin-top:12px; align-items:center;}
+  button{
+    font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:8px; padding:7px 13px; transition:.15s;
+  }
+  button:hover{border-color:var(--miyo); color:var(--miyo-deep); background:var(--miyo-soft);}
+  button:active{transform:scale(.97);}
+  button.primary{background:var(--miyo); border-color:var(--miyo); color:#fff;}
+  button.primary:hover{background:var(--miyo-deep); border-color:var(--miyo-deep); color:#fff;}
+  .stat{margin-left:auto; color:var(--ink3); font-size:12.5px;}
+  .stat b{color:var(--miyo-deep); font-size:14px;}
+  .preset{display:flex; gap:7px; align-items:center; margin-top:10px; flex-wrap:wrap; font-size:12.5px; color:var(--ink2);}
+  .preset button{padding:5px 10px; font-size:12px;}
+
+  .grid{
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr));
+    gap:14px; padding:18px 24px 60px;
+  }
+  .item{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); overflow:hidden; display:flex; flex-direction:column;
+    transition:.18s;
+  }
+  .item:hover{box-shadow:0 2px 4px rgba(24,38,60,.06), 0 12px 28px rgba(24,38,60,.10);}
+  .thumb{
+    position:relative; background:#f7f9fc; border-bottom:1px solid var(--line);
+    aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; overflow:hidden;
+  }
+  .thumb img{width:100%; height:100%; object-fit:contain; object-position:center 32%;}
+  .id{
+    position:absolute; left:8px; top:8px; background:rgba(30,36,48,.78); color:#fff;
+    font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px;
+    font-variant-numeric:tabular-nums;
+  }
+  .official{
+    position:absolute; right:8px; top:8px; background:var(--miyo-soft); color:var(--miyo-deep);
+    font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:6px;
+    border:1px solid rgba(127,201,143,.4);
+  }
+  .body{padding:10px 11px 12px; display:flex; flex-direction:column; gap:8px; flex:1;}
+
+  .emotions{display:flex; flex-wrap:wrap; gap:5px;}
+  .emotions button{
+    padding:4px 9px; font-size:12px; font-weight:600; border-radius:7px;
+  }
+  .emotions button.sel{background:var(--miyo); border-color:var(--miyo); color:#fff;}
+
+  .levelrow{display:flex; align-items:center; gap:7px;}
+  .levelrow .lb{font-size:12px; color:var(--ink3); flex:0 0 auto;}
+  .levels{display:flex; gap:5px;}
+  .levels button{
+    width:26px; padding:4px 0; text-align:center; font-size:12px; border-radius:7px;
+  }
+  .levels button.sel{background:var(--warn); border-color:var(--warn); color:#fff;}
+
+  input[type=text], textarea{
+    width:100%; font-family:inherit; font-size:12.5px; padding:6px 8px;
+    border:1px solid var(--line); border-radius:7px; color:var(--ink); background:#fbfcfe;
+    resize:vertical;
+  }
+  input[type=text]:focus, textarea:focus{outline:none; border-color:var(--miyo); background:#fff;}
+  textarea{min-height:30px;}
+
+  .result{
+    margin-left:auto; font-size:12px; color:var(--ink2);
+  }
+  .result b{color:var(--warn); font-weight:700;}
+
+  .toast{
+    position:fixed; left:50%; bottom:30px; transform:translate(-50%,20px);
+    background:#1e2430; color:#fff; padding:10px 20px; border-radius:9px;
+    font-size:13px; opacity:0; pointer-events:none; transition:.25s; z-index:99;
+  }
+  .toast.show{opacity:1; transform:translate(-50%,0);}
+  .modal{
+    position:fixed; inset:0; background:rgba(20,28,40,.5); display:none;
+    align-items:center; justify-content:center; z-index:100; padding:30px;
+  }
+  .modal.show{display:flex;}
+  .modal .box{
+    background:#fff; border-radius:14px; max-width:760px; width:100%;
+    max-height:80vh; overflow:auto; padding:20px 22px;
+  }
+  .modal h3{margin:0 0 10px; font-size:15px;}
+  .modal pre{
+    background:#f7f9fc; border:1px solid var(--line); border-radius:9px;
+    padding:12px; font-size:11.5px; line-height:1.7; overflow:auto; max-height:52vh;
+    font-family:ui-monospace,Consolas,monospace; color:#3d5570;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>美代 · 差分立绘情感标签</h1>
+  <div class="sub">
+    共 <span id="total">0</span> 张 · 编号 00–06 是官方原始命名（已自动标注），07 以后需要您来定 ·
+    标注会自动存草稿，随时可导出
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="btnExport">导出 JSON</button>
+    <button id="btnCopy">复制到剪贴板</button>
+    <button id="btnReset">全部清空</button>
+    <span class="stat">已标注 <b id="done">0</b> / <span id="total2">0</span></span>
+  </div>
+
+  <div class="preset">
+    快捷：情绪用按钮点选，强度 1–3 档 ——
+    <button data-fill="平静">全部设为「平静1级」</button>
+    <button data-fill="__clear">清空所有标签</button>
+  </div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<div class="toast" id="toast"></div>
+<div class="modal" id="modal">
+  <div class="box">
+    <h3>导出的 JSON（可直接复制给助手）</h3>
+    <pre id="jsonOut"></pre>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* 素材清单：00–37 + 99 + Idle_01 */
+  var SPR_IDS = [];
+  for (var i = 0; i <= 37; i++) SPR_IDS.push(i < 10 ? '0' + i : String(i));
+  SPR_IDS.push('99', 'Idle_01');
+
+  /* 官方原始命名（来自 CH0317_spr.atlas 附件名） */
+  var OFFICIAL = {
+    '00': 'default',
+    '01': 'normal',
+    '02': 'respond',
+    '03': 'smile',
+    '04': 'embarassed',
+    '05': 'serious',
+    '06': 'depressed'
+  };
+  var OFFICIAL_CN = {
+    'default': '默认',
+    'normal': '普通',
+    'respond': '回应',
+    'smile': '微笑',
+    'embarassed': '害羞',
+    'serious': '认真',
+    'depressed': '沮丧'
+  };
+
+  var EMOTIONS = ['开心', '平静', '害羞', '惊讶', '认真', '难过', '生气', '疲惫', '得意', '困惑'];
+
+  var DIR = './assets/spr/';
+  function src(id) { return DIR + 'CH0317_spr_' + id + '.png'; }
+  function label(id) { return id === 'Idle_01' ? '待机帧' : 'No.' + id; }
+
+  /* ---------- 数据 ---------- */
+  var KEY = 'miyo-label-draft-v1';
+  var data = {};
+
+  function loadDraft() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) data = JSON.parse(raw) || {};
+    } catch (e) { data = {}; }
+  }
+  function saveDraft() {
+    try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
+  }
+  function entry(id) {
+    if (!data[id]) data[id] = { emotion: '', level: 0, note: '' };
+    return data[id];
+  }
+
+  /* ---------- 构建界面 ---------- */
+  var grid = document.getElementById('grid');
+
+  SPR_IDS.forEach(function (id) {
+    var it = document.createElement('div');
+    it.className = 'item';
+
+    var off = OFFICIAL[id];
+    var thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    thumb.innerHTML =
+      '<img src="' + src(id) + '" alt="' + label(id) + '" loading="lazy">' +
+      '<span class="id">' + label(id).replace('No.', '') + '</span>' +
+      (off ? '<span class="official">' + off + ' · ' + OFFICIAL_CN[off] + '</span>' : '');
+    it.appendChild(thumb);
+
+    var body = document.createElement('div');
+    body.className = 'body';
+
+    // 情绪按钮
+    var emoWrap = document.createElement('div');
+    emoWrap.className = 'emotions';
+    EMOTIONS.forEach(function (em) {
+      var b = document.createElement('button');
+      b.textContent = em;
+      b.setAttribute('data-emotion', em);
+      b.addEventListener('click', function () {
+        var e = entry(id);
+        e.emotion = (e.emotion === em) ? '' : em;
+        if (e.emotion && !e.level) e.level = 1;
+        if (!e.emotion) e.level = 0;
+        refresh(id);
+        saveDraft();
+      });
+      emoWrap.appendChild(b);
+    });
+    body.appendChild(emoWrap);
+
+    // 强度
+    var lvRow = document.createElement('div');
+    lvRow.className = 'levelrow';
+    lvRow.innerHTML = '<span class="lb">强度</span>';
+    var lvWrap = document.createElement('div');
+    lvWrap.className = 'levels';
+    [1, 2, 3].forEach(function (n) {
+      var b = document.createElement('button');
+      b.textContent = n;
+      b.setAttribute('data-level', n);
+      b.addEventListener('click', function () {
+        var e = entry(id);
+        e.level = (e.level === n) ? 0 : n;
+        refresh(id);
+        saveDraft();
+      });
+      lvWrap.appendChild(b);
+    });
+    lvRow.appendChild(lvWrap);
+
+    var res = document.createElement('span');
+    res.className = 'result';
+    res.setAttribute('data-result', '1');
+    lvRow.appendChild(res);
+    body.appendChild(lvRow);
+
+    // 备注
+    var note = document.createElement('input');
+    note.type = 'text';
+    note.placeholder = '备注（可选）';
+    note.addEventListener('input', function () {
+      entry(id).note = note.value;
+      saveDraft();
+      updateStat();
+    });
+    note.setAttribute('data-note', '1');
+    body.appendChild(note);
+
+    it.appendChild(body);
+    it.setAttribute('data-item', id);
+    grid.appendChild(it);
+  });
+
+  /* ---------- 同步单卡片 UI ---------- */
+  function refresh(id) {
+    var it = grid.querySelector('[data-item="' + id + '"]');
+    if (!it) return;
+    var e = entry(id);
+
+    var emoBtns = it.querySelectorAll('[data-emotion]');
+    for (var i = 0; i < emoBtns.length; i++) {
+      emoBtns[i].classList.toggle('sel', emoBtns[i].getAttribute('data-emotion') === e.emotion);
+    }
+    var lvBtns = it.querySelectorAll('[data-level]');
+    for (var j = 0; j < lvBtns.length; j++) {
+      lvBtns[j].classList.toggle('sel', parseInt(lvBtns[j].getAttribute('data-level'), 10) === e.level);
+    }
+    var noteEl = it.querySelector('[data-note]');
+    if (noteEl && noteEl.value !== e.note) noteEl.value = e.note;
+
+    var r = it.querySelector('[data-result]');
+    r.innerHTML = e.emotion ? '<b>' + e.emotion + e.level + '级</b>' : '<span style="color:#b6bfcb">未标注</span>';
+
+    updateStat();
+  }
+
+  function updateStat() {
+    var n = 0;
+    SPR_IDS.forEach(function (id) { if (data[id] && data[id].emotion) n++; });
+    document.getElementById('done').textContent = n;
+  }
+
+  /* ---------- 快捷填充 ---------- */
+  var presetBtns = document.querySelectorAll('[data-fill]');
+  for (var p = 0; p < presetBtns.length; p++) {
+    presetBtns[p].addEventListener('click', function () {
+      var v = this.getAttribute('data-fill');
+      if (v === '__clear') {
+        SPR_IDS.forEach(function (id) { data[id] = { emotion: '', level: 0, note: '' }; refresh(id); });
+        toast('已清空所有标签');
+      } else {
+        SPR_IDS.forEach(function (id) {
+          if (!data[id] || !data[id].emotion) {
+            data[id] = { emotion: v, level: 1, note: (data[id] && data[id].note) || '' };
+          }
+          refresh(id);
+        });
+        toast('未标注项已设为「' + v + '1级」');
+      }
+      saveDraft();
+    });
+  }
+
+  /* ---------- 导出 ---------- */
+  function buildOutput() {
+    var arr = SPR_IDS.map(function (id) {
+      var e = entry(id);
+      return {
+        id: id,
+        official: OFFICIAL[id] || '',
+        emotion: e.emotion || '',
+        level: e.level || 0,
+        tag: e.emotion ? (e.emotion + e.level + '级') : '',
+        note: e.note || ''
+      };
+    });
+    return {
+      character: '樱井美代 / CH0317',
+      source: 'kivo.wiki',
+      total: SPR_IDS.length,
+      labeled: arr.filter(function (x) { return x.emotion; }).length,
+      items: arr
+    };
+  }
+
+  document.getElementById('btnExport').addEventListener('click', function () {
+    var out = buildOutput();
+    document.getElementById('jsonOut').textContent = JSON.stringify(out, null, 2);
+    document.getElementById('modal').classList.add('show');
+  });
+  document.getElementById('modal').addEventListener('click', function (e) {
+    if (e.target === this) this.classList.remove('show');
+  });
+
+  document.getElementById('btnCopy').addEventListener('click', function () {
+    var txt = JSON.stringify(buildOutput(), null, 2);
+    var done = function () { toast('已复制到剪贴板'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(done, function () { fallbackCopy(txt, done); });
+    } else {
+      fallbackCopy(txt, done);
+    }
+  });
+  function fallbackCopy(txt, cb) {
+    var ta = document.createElement('textarea');
+    ta.value = txt; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); cb(); } catch (e) { toast('复制失败，请用「导出 JSON」'); }
+    document.body.removeChild(ta);
+  }
+
+  document.getElementById('btnReset').addEventListener('click', function () {
+    SPR_IDS.forEach(function (id) { data[id] = { emotion: '', level: 0, note: '' }; refresh(id); });
+    saveDraft();
+    toast('已清空');
+  });
+
+  /* ---------- 提示 ---------- */
+  var toastTimer = null;
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1900);
+  }
+
+  /* ---------- 启动 ---------- */
+  loadDraft();
+  document.getElementById('total').textContent = SPR_IDS.length;
+  document.getElementById('total2').textContent = SPR_IDS.length;
+  SPR_IDS.forEach(refresh);
+  updateStat();
+})();
+</script>
+</body>
+</html>

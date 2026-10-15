@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美代桌宠 · v1 半身差分版</title>
+<!--
+  ============================================================================
+  美代桌宠 · v1 原型（半身差分版）
+  ----------------------------------------------------------------------------
+  角色  樱井美代（桜井ミヨ / Sakurai Miyo）— 蔚蓝档案 / 狂猎艺术学院
+  素材  半身差分 40 张，948×948 PNG 透明底，取自 kivo.wiki
+  版权  素材版权归 NEXON Games 及官方所有，仅供个人使用，请勿用于商业目的。
+  ----------------------------------------------------------------------------
+  更新记录
+    · 表情映射支持「一个状态 → 多个表情」（多选，自动轮播）
+    · 降低立绘摇晃幅度、放慢周期，动作更平稳
+  接口  window.MiyoPet.setState({processing, pending})
+        window.postMessage({type:'miyo-state', payload:{...}})
+        fetch('./status.json')
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#eef2f7;
+    --card:#ffffff;
+    --ink:#1e2430;
+    --ink-2:#5a6473;
+    --ink-3:#8d97a6;
+    --line:#e2e7ef;
+    --miyo:#7fc98f;
+    --miyo-deep:#4f9c66;
+    --miyo-soft:#eaf7ee;
+    --warn:#d99a3c;
+    --warn-soft:#fdf4e5;
+    --radius:14px;
+    --shadow:0 1px 2px rgba(24,38,60,.05), 0 8px 24px rgba(24,38,60,.07);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB",system-ui,-apple-system,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--ink);
+    font-size:14px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .top{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; padding:20px 26px 14px;}
+  .top h1{margin:0; font-size:19px; font-weight:700; letter-spacing:.2px;}
+  .top .sub{color:var(--ink-3); font-size:12.5px;}
+  .tag{display:inline-block; padding:2px 9px; border-radius:999px;
+       background:var(--miyo-soft); color:var(--miyo-deep);
+       font-size:11.5px; font-weight:600; margin-left:2px;}
+
+  .layout{display:grid; grid-template-columns:minmax(420px,1fr) 384px;
+          gap:18px; padding:0 26px 30px; align-items:start;}
+  @media (max-width:1080px){ .layout{grid-template-columns:1fr;} }
+
+  .panel{background:var(--card); border:1px solid var(--line);
+         border-radius:var(--radius); box-shadow:var(--shadow);
+         padding:16px 18px; margin-bottom:16px;}
+  .panel h2{margin:0 0 12px; font-size:13px; font-weight:700; color:var(--ink);
+            display:flex; align-items:center; gap:7px;}
+  .panel h2::before{content:""; width:3px; height:13px; border-radius:2px; background:var(--miyo);}
+  .panel .hint{color:var(--ink-3); font-size:11.5px; margin-top:9px; line-height:1.6;}
+
+  /* ---------- 模拟桌面 ---------- */
+  .desk{position:relative; overflow:hidden;
+        border-radius:var(--radius); border:1px solid #d3dce8;
+        background:
+          radial-gradient(circle at 78% 22%, rgba(255,255,255,.75), transparent 46%),
+          linear-gradient(158deg,#dbe5f1 0%, #c6d5e7 42%, #b3c6dc 100%);
+        min-height:560px; box-shadow:var(--shadow); user-select:none;}
+  .fake-win{position:absolute; left:26px; top:26px; width:270px; height:172px;
+            background:rgba(255,255,255,.62); backdrop-filter:blur(3px);
+            border-radius:10px; border:1px solid rgba(255,255,255,.9);
+            box-shadow:0 6px 18px rgba(40,60,90,.10);}
+  .fake-win i{display:block; height:9px; border-radius:5px; background:rgba(120,140,170,.28); margin:0 16px;}
+  .fake-win i:nth-child(1){margin-top:22px; width:52%;}
+  .fake-win i:nth-child(2){margin-top:11px; width:74%;}
+  .fake-win i:nth-child(3){margin-top:11px; width:64%;}
+  .fake-win i:nth-child(4){margin-top:11px; width:40%;}
+  .desk-label{position:absolute; left:28px; bottom:20px;
+              font-size:11.5px; color:rgba(50,70,100,.55); letter-spacing:.3px;}
+
+  /* ---------- 桌宠 ---------- */
+  /* --pet-w 是桌宠宽度基准，必须与 electron/main.js 的 WIN_BY_MODE.v1.petW 一致
+     （check.js 有断言防漂移）。v1 是 948×948 的正方形半身差分，
+     300px 宽需要 320px 的窗口才放得下 —— 之前窗口恒为 240px，所以被横向裁掉了。 */
+  .pet{--pet-w:300px; position:absolute; right:26px; bottom:0; width:var(--pet-w); cursor:grab;
+       transform:scale(var(--pet-scale,1)); transform-origin:50% 100%;}
+  .pet.dragging{cursor:grabbing;}
+  .sprite{position:relative; width:var(--pet-w); height:300px;
+          transform-origin:50% 92%;
+          filter:drop-shadow(0 12px 22px rgba(30,50,80,.20));}
+  .layer{position:absolute; inset:0; width:100%; height:100%;
+         object-fit:contain; pointer-events:none; -webkit-user-drag:none;
+         transition:opacity .18s ease;}
+  .layer.fade{opacity:0;}
+  .layer-blink{opacity:0; transition:opacity .07s linear;}
+  .layer-blink.on{opacity:1;}
+
+  /* ---------- 动作：幅度收敛、周期放慢 ---------- */
+  @keyframes k-breathe{
+    0%,100%{transform:translateY(0) scale(1);}
+    50%    {transform:translateY(-1.6px) scale(1.002);}
+  }
+  @keyframes k-work{
+    0%,100%{transform:translateY(0) rotate(-.12deg);}
+    25%    {transform:translateY(-.7px) rotate(0deg);}
+    50%    {transform:translateY(-1.3px) rotate(.12deg);}
+    75%    {transform:translateY(-.6px) rotate(0deg);}
+  }
+  @keyframes k-perk{
+    0%,62%,100%{transform:translateY(0) scale(1);}
+    70%        {transform:translateY(-3px) scale(1.004);}
+    78%        {transform:translateY(0) scale(1);}
+    86%        {transform:translateY(-1.5px) scale(1.002);}
+  }
+  .pet[data-mode="idle"]       .sprite{animation:k-breathe 6.8s ease-in-out infinite;}
+  .pet[data-mode="approval"]   .sprite{animation:k-perk 3.0s ease-in-out infinite;}
+  .pet[data-mode="processing"] .sprite{animation:k-work 3.4s ease-in-out infinite;}
+  .pet[data-mode="pending"]    .sprite{animation:k-perk 3.8s ease-in-out infinite;}
+  .pet[data-mode="done"]       .sprite{animation:k-perk 3.6s ease-in-out infinite;}
+  .pet[data-mode="error"]      .sprite{animation:k-breathe 7.4s ease-in-out infinite;}
+
+  /* 拖动时不跟着晃：立绘保持静止，位移完全交给鼠标 */
+  .pet.dragging .sprite,
+  .pet.dragging .sprite.nod{animation:none;}
+
+  /* ---------- 互动反应：短暂上浮，强调表情变化 ---------- */
+  @keyframes k-react{
+    0%  {transform:translateY(0) scale(1);}
+    26% {transform:translateY(-3.6px) scale(1.006);}
+    58% {transform:translateY(-1px) scale(1.002);}
+    100%{transform:translateY(0) scale(1);}
+  }
+  .pet.reacting .sprite{animation:k-react .62s cubic-bezier(.22,.9,.3,1);}
+  .pet.reacting .bubble{border-color:var(--miyo);}
+  .pet.reacting .bubble .nm::after{content:" · 反应中"; color:var(--ink-3); font-weight:400;}
+
+  /* ---------- 互动清单 ---------- */
+  .ixrow{display:grid; grid-template-columns:78px 1fr; gap:1px 10px;
+         padding:7px 0; border-top:1px dashed var(--line); font-size:12px; color:var(--ink-2);}
+  .ixrow:first-child{border-top:0;}
+  .ixrow b{color:var(--ink); font-weight:700; font-size:12.5px;}
+  .ixrow em{grid-column:2; font-style:normal; color:var(--ink-3); font-size:11.5px;}
+
+  /* ---------- 宿主模式（Electron / ?pet=1）· 只留桌宠 ---------- */
+  body.pet-only{background:transparent;}
+  body.pet-only .top,
+  body.pet-only .foot,
+  body.pet-only .layout > div:nth-child(2),
+  body.pet-only .layout > div:nth-child(1) > .panel{display:none;}
+  body.pet-only .layout{display:block; padding:0; gap:0;}
+  body.pet-only .desk{min-height:100vh; border:0; border-radius:0;
+                      background:transparent; box-shadow:none;}
+  body.pet-only .fake-win,
+  body.pet-only .desk-label{display:none;}
+  body.pet-only .pills{left:10px; bottom:104px; transform:scale(.82); transform-origin:left bottom;}
+  body.pet-only .bubble{width:var(--bubble-w,212px);}
+  body.pet-only .pet{left:0; right:0; margin:0 auto;}
+  body.pet-only .pet.hosted{cursor:move;}
+
+  @keyframes k-nod{
+    0%{transform:translateY(0) scale(1);}
+    35%{transform:translateY(4px) scale(.994);}
+    100%{transform:translateY(0) scale(1);}
+  }
+  .sprite.nod{animation:k-nod .42s ease-out;}
+
+  .pet[data-night="1"] .sprite{filter:drop-shadow(0 12px 22px rgba(30,50,80,.28)) saturate(.86) brightness(.93);}
+  .desk[data-night="1"]{background:linear-gradient(158deg,#3a4457 0%,#2f3849 45%,#262e3d 100%);}
+  .desk[data-night="1"] .fake-win{background:rgba(255,255,255,.10); border-color:rgba(255,255,255,.16);}
+  .desk[data-night="1"] .fake-win i{background:rgba(200,215,240,.22);}
+  .desk[data-night="1"] .desk-label{color:rgba(220,232,250,.45);}
+
+  /* ---------- 气泡 ---------- */
+  /* 气泡：宽度/字号由配置驱动（--bubble-w / --bubble-fs），位置由 JS 的 layoutBubble() 算；
+     尾巴改用 left 定位，宽度或偏移一变它还能对准桌宠。 */
+  .bubble{position:absolute; right:auto; left:0; bottom:calc(100% + 8px); z-index:6;
+          width:var(--bubble-w,262px); min-width:120px;
+          background:#fff; color:var(--ink);
+          border:1px solid var(--line); border-radius:13px;
+          padding:10px 13px; font-size:calc(13px * var(--bubble-fs,1)); line-height:1.6;
+          box-shadow:0 6px 20px rgba(24,40,70,.14);
+          opacity:0; transform:translateY(6px);
+          transition:opacity .22s ease, transform .22s ease;
+          pointer-events:none;}
+  .bubble.show{opacity:1; transform:translateY(0);}
+  .bubble::after{content:""; position:absolute; right:auto; left:var(--bubble-tail-x,34px); bottom:-7px;
+                 width:13px; height:13px; background:#fff;
+                 border-right:1px solid var(--line); border-bottom:1px solid var(--line);
+                 transform:rotate(45deg);}
+  .bubble .nm{color:var(--miyo-deep); font-weight:700; display:block; font-size:11.5px; margin-bottom:2px;}
+  .bubble.alert{border-color:#eacf9b; background:var(--warn-soft);}
+  .bubble.alert::after{background:var(--warn-soft); border-color:#eacf9b;}
+  .bubble.alert .nm{color:var(--warn);}
+  @keyframes k-glow{
+    0%,100%{box-shadow:0 6px 20px rgba(24,40,70,.14);}
+    50%    {box-shadow:0 6px 20px rgba(217,154,60,.34);}
+  }
+  .bubble.alert.show{animation:k-glow 2.2s ease-in-out infinite;}
+
+  /* ---------- 状态胶囊 ---------- */
+  .pills{position:absolute; left:26px; bottom:56px; z-index:5;
+         display:flex; flex-direction:column; gap:9px; align-items:flex-start;}
+  .pill{display:flex; align-items:center; gap:8px;
+        background:rgba(255,255,255,.94); border:1px solid rgba(255,255,255,.9);
+        border-radius:999px; padding:7px 14px 7px 10px;
+        font-size:12.5px; font-weight:600; color:var(--ink);
+        box-shadow:0 4px 14px rgba(30,50,80,.13);
+        transition:opacity .25s ease, transform .25s ease;}
+  .pill.off{opacity:.32; transform:translateX(-4px);}
+  .pill .dot{width:8px; height:8px; border-radius:50%; flex:0 0 auto;}
+  .pill.working .dot{background:#5aa3e0; box-shadow:0 0 0 3px rgba(90,163,224,.20);}
+  .pill.asking  .dot{background:var(--warn); box-shadow:0 0 0 3px rgba(217,154,60,.22);}
+  .pill.approving .dot{background:#e2825a; box-shadow:0 0 0 3px rgba(226,130,90,.24);}
+  .pill.approving b{color:#c2603a;}
+  .pill .num{font-variant-numeric:tabular-nums; font-weight:800; font-size:14px;}
+  .pill.asking.hot{animation:k-glow 2.2s ease-in-out infinite; border-color:#eacf9b;}
+  /* 新增：进行中对话 / 统计范围口径 */
+  .pill.convs .dot{background:#8f7fd0; box-shadow:0 0 0 3px rgba(143,127,208,.22);}
+  .pill.scope{cursor:pointer;}
+  .pill.scope .dot{background:#7f9aa8; box-shadow:0 0 0 3px rgba(127,154,168,.20);}
+  .pill.scope.alerting{background:var(--warn-soft); border-color:#eacf9b;}
+  .pill.scope.alerting .dot{background:var(--warn); box-shadow:0 0 0 3px rgba(217,154,60,.24);}
+  .pill.scope.alerting b{color:#c2603a;}
+  /* 被设置关掉的胶囊：整行消失（与「数值为 0 变灰」的 .off 是两回事） */
+  .pill.hide{display:none;}
+
+  /* ---------- 控件 ---------- */
+  .row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0;}
+  .row + .row{border-top:1px dashed var(--line);}
+  .row .lbl{font-size:13px; color:var(--ink-2);}
+  .row .lbl b{color:var(--ink); font-weight:700;}
+  .stepper{display:flex; align-items:center; gap:0; border:1px solid var(--line); border-radius:9px; overflow:hidden;}
+  .stepper button{width:30px; height:29px; border:0; background:#f7f9fc; color:var(--ink-2);
+                  font-size:16px; line-height:1; cursor:pointer; font-family:inherit;}
+  .stepper button:hover{background:var(--miyo-soft); color:var(--miyo-deep);}
+  .stepper button:active{transform:scale(.94);}
+  .stepper .val{width:44px; text-align:center; font-weight:800; font-size:14.5px;
+                font-variant-numeric:tabular-nums; background:#fff; height:29px; line-height:29px;}
+  .btn{border:1px solid var(--line); background:#fff; color:var(--ink);
+       border-radius:9px; padding:7px 13px; font-size:12.5px; font-weight:600;
+       cursor:pointer; font-family:inherit; transition:.16s;}
+  .btn:hover{border-color:var(--miyo); color:var(--miyo-deep); background:var(--miyo-soft);}
+  .btn:active{transform:scale(.97);}
+  .btn.on{background:var(--miyo); border-color:var(--miyo); color:#fff;}
+  .btns{display:flex; gap:8px; flex-wrap:wrap;}
+
+  /* ---------- 映射（多选） ---------- */
+  .maprow{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;
+          padding:9px 0; border-top:1px dashed var(--line);}
+  .maprow:first-of-type{border-top:0;}
+  .maprow .lbl{font-size:13px; color:var(--ink-2); flex:0 0 76px; padding-top:2px;}
+  .mapctl{flex:1; display:flex; flex-wrap:wrap; gap:5px; align-items:center; justify-content:flex-end;}
+  .chip{display:inline-flex; align-items:center; gap:3px; background:var(--miyo-soft);
+        color:var(--miyo-deep); border:1px solid rgba(127,201,143,.45);
+        border-radius:7px; padding:2px 5px 2px 7px; font-size:11.5px; font-weight:600;
+        transition:.15s;}
+  .chip.cur{background:var(--miyo); border-color:var(--miyo); color:#fff;}
+  .chip em{font-style:normal;}
+  .chip button{border:0; background:none; color:inherit; cursor:pointer;
+               font-size:13px; line-height:1; padding:0 1px; opacity:.55; font-family:inherit;}
+  .chip button:hover{opacity:1;}
+  .adder{font-family:inherit; font-size:11.5px; padding:3px 5px; border:1px dashed var(--line);
+         border-radius:7px; background:#fbfcfe; color:var(--ink-2); max-width:78px; cursor:pointer;}
+  .adder:focus{outline:none; border-color:var(--miyo);}
+  .mapnote{color:var(--ink-3); font-size:11.5px; margin-top:10px; line-height:1.6;}
+
+  /* ---------- 画廊 ---------- */
+  .gallery{display:grid; grid-template-columns:repeat(auto-fill,minmax(62px,1fr));
+           gap:7px; max-height:262px; overflow-y:auto; padding-right:4px;}
+  .gallery img{width:100%; aspect-ratio:1/1; object-fit:cover; object-position:top center;
+               border-radius:8px; border:1.5px solid var(--line); background:#fff;
+               cursor:pointer; transition:.15s;}
+  .gallery img:hover{border-color:var(--miyo); transform:translateY(-2px);}
+  .gallery img.sel{border-color:var(--miyo-deep); box-shadow:0 0 0 2px rgba(127,201,143,.35);}
+  .gallery img.inset{border-color:#c9a86a; box-shadow:0 0 0 2px rgba(201,168,106,.30);}
+
+  pre{background:#f7f9fc; border:1px solid var(--line); border-radius:9px;
+      padding:11px 13px; overflow-x:auto; margin:9px 0 0;
+      font-size:11.5px; line-height:1.75; font-family:ui-monospace,Consolas,monospace;
+      color:#3d5570;}
+  .foot{padding:0 26px 34px; color:var(--ink-3); font-size:11.5px; line-height:1.8;}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>美代桌宠 · 半身差分版</h1>
+  <span class="tag">v1</span>
+  <span class="sub">樱井美代 / 狂猎艺术学院 · 实时反映 WorkBuddy 工作状态 · 单击／双击／长按／拖拽互动</span>
+</div>
+
+<div class="layout">
+
+  <!-- ============ 左：模拟桌面 ============ -->
+  <div>
+    <div class="desk" id="desk">
+      <div class="fake-win"><i></i><i></i><i></i><i></i></div>
+
+      <div class="pills">
+        <!-- 口径自曝：桌宠必须让人一眼看出「这些数字算的是哪个范围」，
+             否则一旦被切成「全部会话」，就会出现「界面没有待办、桌宠却报待办」。 -->
+        <div class="pill scope" id="pillScope" title="点一下可切回「仅当前会话」">
+          <span class="dot"></span>统计范围：<b id="scopeText">仅当前会话</b>
+        </div>
+        <div class="pill approving off" id="pillApproval">
+          <span class="dot"></span>有 <span class="num" id="nApproval">0</span> 个操作<b>需要您批准</b>
+        </div>
+        <div class="pill working off" id="pillWorking">
+          <span class="dot"></span>正在处理 <span class="num" id="nWorking">0</span> 个任务中
+        </div>
+        <div class="pill asking off" id="pillAsking">
+          <span class="dot"></span>有 <span class="num" id="nAsking">0</span> 个待办
+        </div>
+        <div class="pill convs off" id="pillConvs" title="心跳 2 分钟内的交互式会话（已按会话去重）">
+          <span class="dot"></span>进行中对话 <span class="num" id="nConvs">0</span>
+        </div>
+      </div>
+
+      <div class="pet" id="pet" data-mode="idle" data-night="0">
+        <div class="bubble" id="bubble">
+          <span class="nm">美代</span>
+          <span id="bubbleText">……</span>
+        </div>
+        <div class="sprite" id="sprite">
+          <img class="layer" id="layerBase" alt="樱井美代">
+          <img class="layer layer-blink" id="layerBlink" alt="">
+        </div>
+      </div>
+
+      <div class="desk-label">模拟桌面 · 桌宠可拖动 · 点击美代可互动</div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <h2>接入方式</h2>
+      <div class="hint">桌宠已预留三种外部状态注入通道，P1 阶段任选其一接真实数据即可。</div>
+      <pre>// 1) 直接调用
+MiyoPet.setState({ processing: 3, pending: 2 });
+
+// 2) 跨窗口 / iframe 消息
+window.postMessage({ type:'miyo-state',
+                     payload:{ processing:3, pending:2 } }, '*');
+
+// 3) 本地服务轮询（同目录放 status.json 即自动生效）
+//    { "processing": 3, "pending": 2 }
+
+// 多表情映射控制
+MiyoPet.getMapping();
+MiyoPet.setMapping('processing', ['36','09']);</pre>
+    </div>
+  </div>
+
+  <!-- ============ 右：控制台 ============ -->
+  <div>
+    <div class="panel">
+      <h2>状态注入（模拟 WorkBuddy）</h2>
+
+      <div class="row">
+        <span class="lbl">正在处理的任务 <b id="txWorking">0</b></span>
+        <div class="stepper">
+          <button data-step="working:-1" aria-label="减少">−</button>
+          <span class="val" id="valWorking">0</span>
+          <button data-step="working:1" aria-label="增加">+</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="lbl">需要确认的任务 <b id="txAsking">0</b></span>
+        <div class="stepper">
+          <button data-step="asking:-1" aria-label="减少">−</button>
+          <span class="val" id="valAsking">0</span>
+          <button data-step="asking:1" aria-label="增加">+</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="lbl">演示脚本</span>
+        <div class="btns">
+          <button class="btn" id="btnDemo">跑一遍状态流转</button>
+          <button class="btn" id="btnReset">归零</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="lbl">夜间模式（23:00–06:00 自动）</span>
+        <button class="btn" id="btnNight">手动切换</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>表情映射（可多选）</h2>
+      <div class="hint" style="margin:0 0 12px;">
+        每个状态可关联<b>多个</b>表情，运行时会自动轮播（每 7 秒换一个）。
+        点 <b>×</b> 移除，右侧下拉追加，<b>点画廊的图也会追加到当前状态</b>。
+      </div>
+      <div id="mapBox"></div>
+      <div class="mapnote">当前轮播到的表情会用实心绿标出。只有一个表情时不轮播。</div>
+    </div>
+
+    <div class="panel">
+      <h2>互动动作</h2>
+      <div class="hint" style="margin:0 0 10px;">
+        在左侧桌宠身上直接操作即可。<b>连续点击会逐级递进</b>——越点越开怀，点到第 7、8 次会不高兴。
+      </div>
+      <div class="btns" id="reactBtns" style="margin-bottom:4px;"></div>
+      <div id="ixList"></div>
+      <div class="mapnote">反应只持续 1.5–3 秒，结束后自动回到当前工作状态的表情。</div>
+    </div>
+
+    <div class="panel">
+      <h2>差分画廊 · 共 <span id="galleryCount">0</span> 张</h2>
+      <div class="gallery" id="gallery"></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  素材来源：kivo.wiki（基沃托斯古书馆）· 樱井美代初始立绘差分 ×40（948×948 PNG 透明底）<br>
+  素材版权归 NEXON Games 及官方所有，仅供个人使用，请勿用于商业目的。
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* =======================================================
+     0. 素材清单
+     ======================================================= */
+  var SPR_IDS = [];
+  for (var i = 0; i <= 37; i++) { SPR_IDS.push(i < 10 ? '0' + i : String(i)); }
+  SPR_IDS.push('99', 'Idle_01');
+
+  var SPR_DIR = './assets/spr/';
+  function sprSrc(id) { return SPR_DIR + 'CH0317_spr_' + id + '.png'; }
+  function sprName(id) { return id === 'Idle_01' ? '待机帧' : 'No.' + id; }
+
+  /* =======================================================
+     1. 状态 → 表情组（多选）
+     ======================================================= */
+  var MAP = {
+    idle:       { sprs: ['00', '01'], blink: '11', blinkOn: true  },
+    approval:   { sprs: ['21', '04'], blink: '99', blinkOn: false },
+    processing: { sprs: ['13'],       blink: '34', blinkOn: true  },
+    pending:    { sprs: ['21'],       blink: '99', blinkOn: true  },
+    done:       { sprs: ['13'],       blink: '34', blinkOn: true  },
+    error:      { sprs: ['06'],       blink: '99', blinkOn: true  }
+  };
+
+  var MODE_LABEL = [
+    ['idle', '待机'], ['approval', '待批准'], ['processing', '处理中'],
+    ['pending', '待办'], ['done', '全部完成'], ['error', '出错']
+  ];
+
+  var cycle = {};
+  var CYCLE_MS = 7000;
+
+  function curSpr(mode) {
+    var arr = MAP[mode] && MAP[mode].sprs;
+    if (!arr || !arr.length) return '00';
+    return arr[(cycle[mode] || 0) % arr.length];
+  }
+
+  function lineFor(mode, s) {
+    if (mode === 'approval') {
+      return (s.approval > 1 ? '有 ' + s.approval + ' 个操作' : '有个操作')
+        + '在等老师点一下「允许」……我就守在这儿，等您。';
+    }
+    if (mode === 'pending') {
+      return s.processing > 0
+        ? '处理中 ' + s.processing + ' 件，另外 ' + s.pending + ' 件在等老师确认……不急，但记得看。'
+        : '有 ' + s.pending + ' 个任务需要确认……这个，您看过了吗？';
+    }
+    if (mode === 'processing') {
+      return '正在处理 ' + s.processing + ' 个任务……我先盯着，老师。';
+    }
+    if (mode === 'done') {
+      return '……都做完了。老师，要不要一起读点什么？';
+    }
+    if (mode === 'error') {
+      return '……好像读不到工作了。我、我再看一遍。';
+    }
+    return '……现在没有待办。要不要，一起读点什么？';
+  }
+
+  /* =======================================================
+     1b. 互动反应表
+     -------------------------------------------------------
+     sprs  一个动作可挂多个表情，按触发次序轮换
+     line  反应时的台词
+     ms    反应持续毫秒，到点自动回落到工作状态
+     ======================================================= */
+  var REACT = {
+    /* 单击 · 连续点击逐级递进：开心 → 害羞 → 不满 → 生气 */
+    click: [
+      { sprs: ['03', '10'], line: '……诶？请、请别吓我。',              ms: 2100 },
+      { sprs: ['07'],       line: '老师？……有什么事吗。',              ms: 2100 },
+      { sprs: ['12', '13'], line: '……嗯，我在的。',                    ms: 2200 },
+      { sprs: ['13', '14'], line: '……嗯！这样、这样就完稿了……！',     ms: 2300 },
+      { sprs: ['29', '30'], line: '呀……别、别一直戳我……',            ms: 2400 },
+      { sprs: ['20', '05'], line: '……老师，手，可以放开了吗。',        ms: 2600 },
+      { sprs: ['18'],       line: '（抱着稿子鼓着脸）……我又不是按钮。', ms: 2800 },
+      { sprs: ['16', '17'], line: '（别过脸去）……不理您了。',          ms: 3000 }
+    ],
+    dblclick:  { sprs: ['30', '31'], line: '诶、诶——！？……太、太近了。',      ms: 2600 },
+    longpress: { sprs: ['04', '21'], line: '（愣住）……您、您在做什么。',       ms: 2600 },
+    dragstart: { sprs: ['23', '24'], line: '呀——！放、放我下来……',          ms: 0    },
+    drop:      { sprs: ['22'],       line: '（理了理衣角）……下次，先说一声。',  ms: 2400 },
+    hover:     { sprs: ['36'],       line: '……嗯？',                        ms: 1500 }
+  };
+
+  var STREAK_WINDOW = 2600;      // 连续点击的判定窗口（毫秒）
+  var react = null;              // 当前反应 {sprs,line,until,pick}
+  var kindSeq = {};              // 每种动作的触发计数（用于轮换表情）
+  var clickStreak = 0, lastClickAt = 0;
+
+  var IX_INFO = [
+    ['单击 ×1–4',   '开心1级 → 开心2级 → 开心3级',      '越点越开怀'],
+    ['单击 ×5–8',   '害羞1级 → 不满 → 鼓脸 → 生气3级',  '再点就不高兴了'],
+    ['双击',        '害羞2级',                        '「诶、诶——！？」'],
+    ['长按 0.7 秒', '困惑2级',                        '愣住'],
+    ['按住拖动',    '惊讶1级／2级',                    '被拎起来了'],
+    ['松开放下',    '困惑3级',                        '整理衣角'],
+    ['悬停 1.6 秒', '认真1级',                        '「……嗯？」']
+  ];
+
+  var IX_TEST = [
+    ['单击 ×1', 'click', 1], ['单击 ×3', 'click', 3], ['单击 ×5', 'click', 5],
+    ['单击 ×8', 'click', 8], ['双击', 'dblclick'], ['长按', 'longpress'],
+    ['拖动', 'dragstart'], ['放下', 'drop'], ['悬停', 'hover']
+  ];
+
+  /* =======================================================
+     2. 状态
+     ======================================================= */
+  var state = { processing: 0, pending: 0, approval: 0, completed: 0,
+                conversations: 0, scope: 'current',
+                night: null, bubble: true, done: false,
+                ok: true, degraded: false, error: false };
+  var doneUntil = 0;
+  /* 宿主模式：状态只走 IPC；开发态才启用 status.json / postMessage */
+  var HOSTED = !!(window.petHost && typeof window.petHost.onState === 'function');
+  var lastRev = -1;
+  var showApproval = true;
+
+  var els = {
+    desk: document.getElementById('desk'),
+    pet: document.getElementById('pet'),
+    sprite: document.getElementById('sprite'),
+    layerBase: document.getElementById('layerBase'),
+    layerBlink: document.getElementById('layerBlink'),
+    bubble: document.getElementById('bubble'),
+    bubbleText: document.getElementById('bubbleText'),
+    pillWorking: document.getElementById('pillWorking'),
+    pillAsking: document.getElementById('pillAsking'),
+    pillApproval: document.getElementById('pillApproval'),
+    pillScope: document.getElementById('pillScope'),
+    scopeText: document.getElementById('scopeText'),
+    pillConvs: document.getElementById('pillConvs'),
+    nConvs: document.getElementById('nConvs'),
+    nWorking: document.getElementById('nWorking'),
+    nAsking: document.getElementById('nAsking'),
+    nApproval: document.getElementById('nApproval'),
+    txWorking: document.getElementById('txWorking'),
+    txAsking: document.getElementById('txAsking'),
+    valWorking: document.getElementById('valWorking'),
+    valAsking: document.getElementById('valAsking'),
+    mapBox: document.getElementById('mapBox'),
+    gallery: document.getElementById('gallery'),
+    galleryCount: document.getElementById('galleryCount')
+  };
+
+  function resolveMode(s) {
+    if (s.error) return 'error';                              // 连续读不到状态 → 错误态
+    if (showApproval && s.approval > 0) return 'approval';    // 权限待批准：优先级最高
+    if (s.pending > 0) return 'pending';
+    if (s.processing > 0) return 'processing';
+    if (s.done) {                                             // 完成态（本轮为 v1 新增）
+      if (Date.now() < doneUntil) return 'done';
+      s.done = false;
+    }
+    return 'idle';
+  }
+
+  function isNight(s) {
+    if (s.night === true) return true;
+    if (s.night === false) return false;
+    var h = new Date().getHours();
+    return h >= 23 || h < 6;
+  }
+
+  /* =======================================================
+     3. 渲染
+     ======================================================= */
+  var lastMode = null;
+  var lastSrc = null;
+  var bubbleTimer = null;
+  var srcTimer = null;
+
+  function setBaseSrc(url) {
+    if (lastSrc === url) return;
+    lastSrc = url;
+    els.layerBase.classList.add('fade');
+    if (srcTimer) clearTimeout(srcTimer);
+    srcTimer = setTimeout(function () {
+      els.layerBase.src = url;
+      els.layerBase.classList.remove('fade');
+    }, 170);
+  }
+
+  function liveReact() {
+    return (react && react.until > Date.now()) ? react : null;
+  }
+
+  /* =======================================================
+     3b. 自定义台词 / 语音通道 / 整点播报
+     ======================================================= */
+  var CUSTOM_LINES = {};        // { mode: ['台词A','台词B'] } —— 来自配置；空则回落内置 lineFor
+  var VOICES = {};              // { mode: [{file,text}] } —— 本轮只留通道，不播放
+
+  /** 台词取值：优先自定义。多条时用**与表情同一个 cycle 索引**，做到表情与台词同步轮播。 */
+  function lineOf(mode) {
+    var arr = CUSTOM_LINES[mode];
+    if (arr && arr.length) return arr[(cycle[mode] || 0) % arr.length];
+    return lineFor(mode, state);
+  }
+
+  /**
+   * 整点播报：主进程到点推下来，这里复用现成的「反应层」表现，不新增状态机。
+   * 刻意不调 touch() —— 整点报时不是用户操作，不该重置空闲生气计时。
+   */
+  function playChime(p) {
+    if (!p) return;
+    var mode = resolveMode(state);
+    var base = MAP[mode];
+    var sprs = (p.sprs && p.sprs.length) ? p.sprs : (base && base.sprs ? base.sprs : []);
+    if (!sprs.length) return;
+    var lines = p.lines || [];
+    react = {
+      sprs: sprs.slice(),
+      line: lines.length ? lines[(cycle[mode] || 0) % lines.length]
+                         : '……' + (p.hour != null ? p.hour : '') + ' 点整了，老师。',
+      until: Date.now() + (p.ms || 12000),
+      pick: 0,
+      chime: true
+    };
+    render(false);
+  }
+
+  /**
+   * 语音通道（预留）：现在只记录 + 广播事件，**不播放**。
+   * 将来接入官方语音时，只需把 voices 里的 file 交给 Audio 播即可，配置结构不用再改。
+   */
+  function playVoice(mode) {
+    var list = VOICES[mode];
+    if (!list || !list.length) { console.debug('[miyo-voice] 无语音配置：' + mode); return null; }
+    var one = list[(cycle[mode] || 0) % list.length];
+    console.debug('[miyo-voice] 待播放（尚未实现）：' + mode + ' → ' + (one.file || '(未指定文件)'));
+    try {
+      window.dispatchEvent(new CustomEvent('miyo-voice', {
+        detail: { mode: mode, file: one.file, text: one.text }
+      }));
+    } catch (e) { /* ignore */ }
+    if (HOSTED && window.petHost && typeof window.petHost.speak === 'function') {
+      try { window.petHost.speak({ mode: mode, text: one.text || '', file: one.file || '' }); } catch (e2) { /* ignore */ }
+    }
+    return one;
+  }
+
+  /* ---------- 胶囊显隐（设置里可逐项关掉；关掉 = 整行消失） ---------- */
+  var pillVisible = { working: true, asking: true, conversations: true };
+
+  function applyPillVisible() {
+    els.pillWorking.classList.toggle('hide', pillVisible.working === false);
+    els.pillAsking.classList.toggle('hide', pillVisible.asking === false);
+    els.pillConvs.classList.toggle('hide', pillVisible.conversations === false);
+    els.pillApproval.classList.toggle('hide', showApproval === false);
+    /* pillScope 故意常显：它就是「这些数字算的是哪个范围」的自曝，关掉又会看不出差异 */
+  }
+
+  /* ---------- 气泡的位置与大小（配置驱动） ----------
+     注意坐标系：.bubble 是 .pet 的子元素，会和桌宠一起被 --pet-scale 缩放，
+     所以这里一律用「.pet 的布局坐标」计算，不要把 scale 乘进去。 */
+  var bubbleCfg = { width: 262, fontScale: 1, offsetX: 0, offsetY: 0, align: 'right' };
+
+  function currentScale() {
+    var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pet-scale'));
+    return isFinite(v) && v > 0 ? v : 1;
+  }
+
+  function layoutBubble() {
+    if (!els.bubble || !els.pet) return;
+    var root = document.documentElement;
+    root.style.setProperty('--bubble-w', bubbleCfg.width + 'px');
+    root.style.setProperty('--bubble-fs', String(bubbleCfg.fontScale));
+
+    var scale = currentScale();
+    var petW = els.pet.offsetWidth || 300;
+    var petH = els.pet.offsetHeight || 300;
+    var vw = root.clientWidth / scale;          // 视口换算到 .pet 坐标系
+    var w = bubbleCfg.width;
+
+    var left;
+    if (bubbleCfg.align === 'left') left = bubbleCfg.offsetX;
+    else if (bubbleCfg.align === 'center') left = (petW - w) / 2 + bubbleCfg.offsetX;
+    else left = petW - w + bubbleCfg.offsetX;   // 默认：右对齐
+    left = Math.max(2, Math.min(Math.max(2, vw - w - 2), left));
+
+    els.bubble.style.left = Math.round(left) + 'px';
+    els.bubble.style.right = 'auto';
+    els.bubble.style.bottom = Math.round(petH + 8 + bubbleCfg.offsetY) + 'px';
+
+    /* 尾巴瞄准桌宠中线：宽度或偏移一变，它自己跟着跑 */
+    var tail = Math.round(petW / 2 - left - 6);
+    tail = Math.max(10, Math.min(Math.max(11, w - 24), tail));
+    root.style.setProperty('--bubble-tail-x', tail + 'px');
+  }
+
+  function render(isInit) {
+    var mode = resolveMode(state);
+    var night = isNight(state);
+    var live = liveReact();
+    var shown = live ? live.sprs[live.pick % live.sprs.length] : curSpr(mode);
+
+    els.pet.setAttribute('data-mode', mode);
+    els.pet.setAttribute('data-night', night ? '1' : '0');
+    els.desk.setAttribute('data-night', night ? '1' : '0');
+    els.pet.classList.toggle('reacting', !!live);
+
+    setBaseSrc(sprSrc(shown));
+    els.layerBlink.src = (!live && MAP[mode].blinkOn) ? sprSrc(MAP[mode].blink) : '';
+
+    els.nWorking.textContent = state.processing;
+    els.nAsking.textContent = state.pending;
+    els.nApproval.textContent = state.approval;
+    els.txWorking.textContent = state.processing;
+    els.txAsking.textContent = state.pending;
+    els.valWorking.textContent = state.processing;
+    els.valAsking.textContent = state.pending;
+
+    els.pillWorking.classList.toggle('off', state.processing <= 0);
+    els.pillAsking.classList.toggle('off', state.pending <= 0);
+    els.pillAsking.classList.toggle('hot', state.pending > 0);
+    var apOn = showApproval && state.approval > 0;
+    els.pillApproval.classList.toggle('off', !apOn);
+    els.pillApproval.classList.toggle('hot', apOn);
+
+    /* 进行中对话数 */
+    els.nConvs.textContent = state.conversations;
+    els.pillConvs.classList.toggle('off', state.conversations <= 0);
+
+    /* 口径自曝：一眼看出这些数字算的是哪个范围 */
+    var allScope = state.scope === 'all';
+    els.scopeText.textContent = allScope ? '全部会话（含历史）' : '仅当前会话';
+    els.pillScope.classList.toggle('alerting', allScope);
+    applyPillVisible();
+
+    els.pet.setAttribute('data-degraded', state.degraded ? '1' : '0');
+    els.pet.setAttribute('title', state.degraded
+      ? ('状态读取降级：' + (state.note || '暂时读不到任务数据'))
+      : '');
+
+    els.bubble.classList.toggle('alert', !live && (mode === 'pending' || mode === 'approval'));
+    if (state.bubble !== false) {
+      els.bubbleText.textContent = live ? live.line : lineOf(mode);
+      els.bubble.classList.add('show');
+    } else {
+      els.bubble.classList.remove('show');
+    }
+
+    if (!isInit && lastMode !== null && lastMode !== mode) {
+      els.sprite.classList.remove('nod');
+      void els.sprite.offsetWidth;
+      els.sprite.classList.add('nod');
+    }
+    lastMode = mode;
+
+    renderMapChips();
+    highlightGallery(shown);
+    layoutBubble();          // 尺寸随 scale / 配置变，每帧校准一次
+    return mode;
+  }
+
+  /* =======================================================
+     4. 眨眼
+     ======================================================= */
+  var blinkTimer = null;
+  function scheduleBlink() {
+    if (blinkTimer) clearTimeout(blinkTimer);
+    blinkTimer = setTimeout(function () {
+      if (!liveReact() && MAP[resolveMode(state)].blinkOn) {
+        els.layerBlink.classList.add('on');
+        setTimeout(function () { els.layerBlink.classList.remove('on'); }, 105 + Math.random() * 70);
+      }
+      scheduleBlink();
+    }, 2600 + Math.random() * 3800);
+  }
+
+  /* =======================================================
+     5. 对外接口
+     ======================================================= */
+  function setState(patch) {
+    if (!patch || typeof patch !== 'object') return;
+
+    /* rev 单调闸：陈旧来源不会覆盖更新的来源 */
+    if (typeof patch.rev === 'number') {
+      if (patch.rev < lastRev) return;
+      lastRev = patch.rev;
+    }
+
+    var before = state.processing + state.pending;
+    if (typeof patch.processing === 'number') state.processing = Math.max(0, Math.floor(patch.processing));
+    if (typeof patch.pending === 'number') state.pending = Math.max(0, Math.floor(patch.pending));
+    if (typeof patch.approval === 'number' || patch.approval === null) {
+      state.approval = (patch.approval === null) ? 0 : Math.max(0, Math.floor(patch.approval));
+    }
+    if (typeof patch.completed === 'number') state.completed = Math.max(0, Math.floor(patch.completed));
+    if (typeof patch.conversations === 'number') state.conversations = Math.max(0, Math.floor(patch.conversations));
+    if (typeof patch.scope === 'string') state.scope = patch.scope;
+    if (typeof patch.ok === 'boolean') state.ok = patch.ok;
+    if (typeof patch.degraded === 'boolean') state.degraded = patch.degraded;
+    if (typeof patch.error === 'boolean') state.error = patch.error;
+    if (patch.errors && patch.errors.length) state.note = patch.errors.join('；');
+    if (typeof patch.night === 'boolean' || patch.night === null) state.night = patch.night;
+    if (typeof patch.bubble === 'boolean') state.bubble = patch.bubble;
+    if (typeof patch.showApproval === 'boolean') showApproval = patch.showApproval;
+
+    /* 完成态：优先信主进程的 justDone（只在健康快照上置位） */
+    if (patch.justDone === true) { state.done = true; doneUntil = Date.now() + 8000; }
+
+    var after = state.processing + state.pending;
+    if (after !== before) {
+      /* 只有健康快照才允许用计数推断完成 —— 避免「读失败」被误判成「做完了」 */
+      if (!patch.degraded && patch.ok !== false) {
+        state.done = (before > 0 && after === 0);
+        doneUntil = state.done ? Date.now() + 8000 : 0;
+      }
+    }
+    if (patch.processing > 0 || patch.pending > 0 || patch.approval > 0) { state.done = false; doneUntil = 0; }
+    render(false);
+  }
+
+  /* v1 没有「空闲生气」这套档位（那是 v2 的特性），但**对外接口必须与 v2 完全一致**，
+     所以保留 touch()：它在这里只记录「用户有操作」这个事实，不带任何计时表现。 */
+  var lastTouchAt = 0;
+  function touch() { lastTouchAt = Date.now(); }
+
+  window.MiyoPet = {
+    setState: setState,
+    getState: function () {
+      return {
+        processing: state.processing, pending: state.pending,
+        approval: state.approval, completed: state.completed,
+        conversations: state.conversations, scope: state.scope,
+        ok: state.ok, degraded: state.degraded, error: state.error,
+        rev: lastRev
+      };
+    },
+    getMode: function () { return resolveMode(state); },
+    getSpr: function () { return curSpr(resolveMode(state)); },
+    isHosted: function () { return HOSTED; },
+    setApprovalVisible: function (flag) { showApproval = !!flag; render(false); },
+    /* 胶囊显隐（宿主 / 设置页用）：{ working, asking, conversations } */
+    setPillVisible: function (map) {
+      if (!map || typeof map !== 'object') return;
+      Object.keys(pillVisible).forEach(function (k) {
+        if (typeof map[k] === 'boolean') pillVisible[k] = map[k];
+      });
+      render(false);
+    },
+    /* 整点播报（宿主 / 外部触发）：{ hour, lines[], sprs[], ms } */
+    chime: playChime,
+    /* 语音通道（预留）：现在只广播事件，不播放 */
+    playVoice: playVoice,
+    touch: touch,
+    setMapping: function (mode, ids) {
+      if (!MAP[mode]) return;
+      var arr = Array.isArray(ids) ? ids.slice() : [ids];
+      arr = arr.filter(function (x) { return SPR_IDS.indexOf(x) >= 0; });
+      if (arr.length) { MAP[mode].sprs = arr; cycle[mode] = 0; render(false); }
+    },
+    getMapping: function () {
+      var out = {};
+      Object.keys(MAP).forEach(function (k) { out[k] = MAP[k].sprs.slice(); });
+      return out;
+    },
+    react: doReaction,                                  // 外部触发互动：MiyoPet.react('click', 3)
+    liveLine: function () { var r = liveReact(); return r ? r.line : null; },
+    reaction: function () {                             // 当前反应快照（调试 / 宿主可用）
+      var r = liveReact();
+      if (!r) return null;
+      return { line: r.line, spr: r.sprs[r.pick % r.sprs.length], left: r.until - Date.now() };
+    }
+  };
+
+  /* 开发态通道：宿主模式下全部关闭 —— 状态只走 IPC，避免陈旧 status.json 覆盖实时值 */
+  window.addEventListener('message', function (e) {
+    if (HOSTED) return;
+    var d = e && e.data;
+    if (d && d.type === 'miyo-state' && d.payload) setState(d.payload);
+  });
+  window.addEventListener('miyo-state', function (e) {
+    if (HOSTED) return;
+    if (e && e.detail) setState(e.detail);
+  });
+
+  function pollStatus() {
+    if (HOSTED) return;
+    try {
+      fetch('./status.json?_=' + Date.now())
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d) setState(d); })
+        .catch(function () {});
+    } catch (e) {}
+  }
+  if (!HOSTED) {
+    setInterval(pollStatus, 3000);
+    pollStatus();
+  }
+  /* 宿主模式下状态由 petHost.onState 驱动，这里不再自己取数 */
+
+  /* =======================================================
+     6. 控制台
+     ======================================================= */
+  var btns = document.querySelectorAll('[data-step]');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].addEventListener('click', function () {
+      var parts = this.getAttribute('data-step').split(':');
+      var patch = {};
+      patch[parts[0]] = state[parts[0]] + parseInt(parts[1], 10);
+      setState(patch);
+    });
+  }
+
+  document.getElementById('btnReset').addEventListener('click', function () {
+    setState({ processing: 0, pending: 0 });
+  });
+  document.getElementById('btnNight').addEventListener('click', function () {
+    setState({ night: !isNight(state) });
+  });
+
+  var demoRunning = false;
+  document.getElementById('btnDemo').addEventListener('click', function () {
+    if (demoRunning) return;
+    demoRunning = true;
+    var btn = this;
+    btn.textContent = '演示中…';
+    btn.classList.add('on');
+    var steps = [
+      { t: 0,    s: { processing: 0, pending: 0 } },
+      { t: 700,  s: { processing: 1, pending: 0 } },
+      { t: 1600, s: { processing: 3, pending: 0 } },
+      { t: 2700, s: { processing: 3, pending: 2 } },
+      { t: 4200, s: { processing: 0, pending: 2 } },
+      { t: 5800, s: { processing: 0, pending: 0 } }
+    ];
+    steps.forEach(function (step) {
+      setTimeout(function () { setState(step.s); }, step.t);
+    });
+    setTimeout(function () {
+      demoRunning = false;
+      btn.textContent = '跑一遍状态流转';
+      btn.classList.remove('on');
+    }, 6600);
+  });
+
+  /* =======================================================
+     7. 映射 UI（多选 chips）
+     ======================================================= */
+  function buildMapUI() {
+    MODE_LABEL.forEach(function (pair) {
+      var mode = pair[0], label = pair[1];
+      var row = document.createElement('div');
+      row.className = 'maprow';
+      row.innerHTML = '<div class="lbl">' + label + '</div>';
+
+      var ctl = document.createElement('div');
+      ctl.className = 'mapctl';
+
+      var chips = document.createElement('div');
+      chips.className = 'mapctl';
+      chips.setAttribute('data-chips', mode);
+      ctl.appendChild(chips);
+
+      var adder = document.createElement('select');
+      adder.className = 'adder';
+      adder.setAttribute('data-adder', mode);
+      var o0 = document.createElement('option');
+      o0.value = ''; o0.textContent = '＋添加';
+      adder.appendChild(o0);
+      SPR_IDS.forEach(function (id) {
+        var o = document.createElement('option');
+        o.value = id; o.textContent = sprName(id);
+        adder.appendChild(o);
+      });
+      adder.addEventListener('change', function () {
+        if (!adder.value) return;
+        var arr = MAP[mode].sprs;
+        if (arr.indexOf(adder.value) < 0) arr.push(adder.value);
+        adder.value = '';
+        render(false);
+      });
+      ctl.appendChild(adder);
+
+      row.appendChild(ctl);
+      els.mapBox.appendChild(row);
+    });
+  }
+
+  function renderMapChips() {
+    var mode = resolveMode(state);
+    MODE_LABEL.forEach(function (pair) {
+      var m = pair[0];
+      var box = els.mapBox.querySelector('[data-chips="' + m + '"]');
+      if (!box) return;
+      box.innerHTML = '';
+      MAP[m].sprs.forEach(function (id) {
+        var c = document.createElement('span');
+        c.className = 'chip' + (m === mode && id === curSpr(mode) ? ' cur' : '');
+        c.innerHTML = '<em>' + sprName(id) + '</em>';
+        var x = document.createElement('button');
+        x.textContent = '×';
+        x.title = '移除';
+        x.addEventListener('click', function () {
+          var arr = MAP[m].sprs;
+          if (arr.length <= 1) return;
+          var k = arr.indexOf(id);
+          if (k >= 0) arr.splice(k, 1);
+          cycle[m] = 0;
+          render(false);
+        });
+        c.appendChild(x);
+        box.appendChild(c);
+      });
+    });
+  }
+
+  /* =======================================================
+     8. 画廊
+     ======================================================= */
+  function buildGallery() {
+    els.galleryCount.textContent = SPR_IDS.length;
+    var frag = document.createDocumentFragment();
+    SPR_IDS.forEach(function (id) {
+      var img = document.createElement('img');
+      img.src = sprSrc(id);
+      img.loading = 'lazy';
+      img.alt = sprName(id);
+      img.title = sprName(id) + '（点击追加到当前状态）';
+      img.setAttribute('data-id', id);
+      img.addEventListener('click', function () {
+        var mode = resolveMode(state);
+        if (MAP[mode].sprs.indexOf(id) < 0) MAP[mode].sprs.push(id);
+        render(false);
+      });
+      frag.appendChild(img);
+    });
+    els.gallery.appendChild(frag);
+  }
+
+  function highlightGallery(mode) {
+    var all = [];
+    Object.keys(MAP).forEach(function (k) {
+      MAP[k].sprs.forEach(function (id) { if (all.indexOf(id) < 0) all.push(id); });
+    });
+    var cur = curSpr(mode);
+    var imgs = els.gallery.querySelectorAll('img');
+    for (var i = 0; i < imgs.length; i++) {
+      var id = imgs[i].getAttribute('data-id');
+      imgs[i].classList.toggle('sel', id === cur);
+      imgs[i].classList.toggle('inset', all.indexOf(id) >= 0 && id !== cur);
+    }
+  }
+
+  /* =======================================================
+     9. 互动反应：单击递进 / 双击 / 长按 / 拖拽 / 悬停
+     ======================================================= */
+  function doReaction(kind, streak) {
+    var def = REACT[kind];
+    if (!def) return;
+    var pick = 0;
+    if (Array.isArray(def)) {
+      var lv = Math.min(Math.max(1, streak || 1), def.length);
+      def = def[lv - 1];
+      pick = 0;                                  // 递进等级 → 固定取第一张，行为可预期
+    } else {
+      kindSeq[kind] = (kindSeq[kind] || 0) + 1;
+      pick = kindSeq[kind] - 1;                  // 其余动作 → 每次换一张，增加变化
+    }
+    if (!def) return;
+    react = {
+      sprs: def.sprs.slice(),
+      line: def.line,
+      until: Date.now() + (def.ms || 2000),
+      pick: pick
+    };
+    els.pet.classList.remove('reacting');      // 让入场动画能重放
+    void els.pet.offsetWidth;
+    render(false);
+  }
+
+  function bindInteract() {
+    var pet = els.pet, desk = els.desk;
+    var dragging = false, moved = false, longPressed = false;
+    var sx = 0, sy = 0, ox = 0, oy = 0;      // 窗口内坐标（浏览器模式）
+    var lsx = 0, lsy = 0;                    // 屏幕坐标（宿主模式，用于驱动窗口位移）
+    var pressTimer = null, hoverTimer = null;
+
+    function layout() {
+      var r = desk.getBoundingClientRect();
+      var w = pet.offsetWidth || 300;
+      pet.style.right = 'auto';
+      pet.style.bottom = 'auto';
+      pet.style.left = Math.max(0, r.width - w - 26) + 'px';
+      pet.style.top = Math.max(0, r.height - pet.offsetHeight) + 'px';
+    }
+    var hosted = !!(window.petHost && typeof window.petHost.move === 'function');
+    if (!hosted) { layout(); window.addEventListener('resize', layout); }
+    else { pet.classList.add('hosted'); }
+
+    function place(x, y) {
+      var r = desk.getBoundingClientRect();
+      var maxX = Math.max(0, r.width - pet.offsetWidth);
+      x = Math.min(maxX, Math.max(0, x));
+      y = Math.min(r.height - 40, Math.max(0, y));
+      pet.style.left = x + 'px';
+      pet.style.top = y + 'px';
+    }
+
+    function screenOf(pt) {   // 触屏事件没有 screenX/Y，退回 client 坐标
+      return {
+        x: (pt.screenX != null) ? pt.screenX : pt.clientX,
+        y: (pt.screenY != null) ? pt.screenY : pt.clientY
+      };
+    }
+
+    function onDown(e) {
+      var pt = e.touches ? e.touches[0] : e;
+      var r = pet.getBoundingClientRect();
+      var d = desk.getBoundingClientRect();
+      ox = r.left - d.left; oy = r.top - d.top;
+      sx = pt.clientX; sy = pt.clientY;
+      var sp = screenOf(pt); lsx = sp.x; lsy = sp.y;
+      dragging = true; moved = false; longPressed = false;
+      pet.classList.add('dragging');
+      if (pressTimer) clearTimeout(pressTimer);
+      pressTimer = setTimeout(function () {        // 长按 0.7 秒
+        if (dragging && !moved) { longPressed = true; doReaction('longpress'); }
+      }, 700);
+      e.preventDefault();
+    }
+    function onMove(e) {
+      if (!dragging) return;
+      var pt = e.touches ? e.touches[0] : e;
+      var dx = pt.clientX - sx, dy = pt.clientY - sy;
+      if (!moved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {   // 真的拖起来了
+        moved = true;
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        doReaction('dragstart');
+        var s0 = screenOf(pt); lsx = s0.x; lsy = s0.y;   // 拖拽起点重新对齐
+      }
+      if (hosted) {
+        /* 关键修复：宿主模式下窗口会跟着鼠标跑，用 clientX/Y 求增量会形成
+           「窗口动 → 视口坐标跟着动」的正反馈，表现为越拖越快、并持续向下偏。
+           这里一律按屏幕坐标求增量，窗口位移与鼠标位移一一对应。 */
+        if (moved) {
+          var sp = screenOf(pt);
+          var ddx = sp.x - lsx, ddy = sp.y - lsy;
+          lsx = sp.x; lsy = sp.y;
+          if (ddx || ddy) window.petHost.move(ddx, ddy);
+        }
+      } else if (moved) {
+        place(ox + dx, oy + dy);
+      }
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      pet.classList.remove('dragging');
+      if (moved && !longPressed) doReaction('drop');
+    }
+
+    pet.addEventListener('mousedown', onDown);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    pet.addEventListener('touchstart', onDown, { passive: false });
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+
+    /* 单击：立即响应；连续点击在 2.6 秒窗口内逐级递进 */
+    pet.addEventListener('click', function () {
+      if (moved || longPressed) { moved = false; longPressed = false; return; }
+      var now = Date.now();
+      if (now - lastClickAt > STREAK_WINDOW) clickStreak = 0;
+      clickStreak++;
+      lastClickAt = now;
+      doReaction('click', clickStreak);
+    });
+
+    /* 双击：一次连击里只补一次「害羞」的插曲，不打断递进 */
+    pet.addEventListener('dblclick', function () {
+      if (moved || longPressed) return;
+      if (clickStreak === 2) doReaction('dblclick');
+    });
+
+    pet.addEventListener('mouseenter', function () {
+      if (hoverTimer) clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(function () {
+        if (!dragging && !liveReact()) doReaction('hover');
+      }, 1600);
+    });
+    pet.addEventListener('mouseleave', function () {
+      if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    });
+
+    /* 右键：交宿主弹原生菜单（浏览器里则屏蔽默认菜单） */
+    pet.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      if (window.petHost && typeof window.petHost.menu === 'function') window.petHost.menu();
+    });
+  }
+
+  /* =======================================================
+     10. 互动面板
+     ======================================================= */
+  function buildReactUI() {
+    var box = document.getElementById('reactBtns');
+    IX_TEST.forEach(function (t) {
+      var b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = t[0];
+      b.addEventListener('click', function () { doReaction(t[1], t[2]); });
+      box.appendChild(b);
+    });
+    var list = document.getElementById('ixList');
+    IX_INFO.forEach(function (r) {
+      var d = document.createElement('div');
+      d.className = 'ixrow';
+      d.innerHTML = '<b>' + r[0] + '</b><span>' + r[1] + '</span><em>' + r[2] + '</em>';
+      list.appendChild(d);
+    });
+  }
+
+  /* =======================================================
+     11. 启动
+     ======================================================= */
+  /* =======================================================
+     12. 宿主配置（表情映射 + 显示大小）
+     ======================================================= */
+  function applyConfig(cfg) {
+    if (!cfg || typeof cfg !== 'object') return;
+    if (typeof cfg.scale === 'number' && cfg.scale >= 0.4 && cfg.scale <= 2.5) {
+      document.documentElement.style.setProperty('--pet-scale', String(cfg.scale));
+    }
+    if (typeof cfg.showApproval === 'boolean') showApproval = cfg.showApproval;
+    if (typeof cfg.scope === 'string') state.scope = cfg.scope;
+
+    /* 胶囊显隐 */
+    if (cfg.pillVisible && typeof cfg.pillVisible === 'object') {
+      Object.keys(pillVisible).forEach(function (k) {
+        if (typeof cfg.pillVisible[k] === 'boolean') pillVisible[k] = cfg.pillVisible[k];
+      });
+    }
+
+    /* 气泡位置与大小 */
+    if (cfg.bubble && typeof cfg.bubble === 'object') {
+      ['width', 'fontScale', 'offsetX', 'offsetY'].forEach(function (k) {
+        if (typeof cfg.bubble[k] === 'number' && isFinite(cfg.bubble[k])) bubbleCfg[k] = cfg.bubble[k];
+      });
+      if (['left', 'center', 'right'].indexOf(cfg.bubble.align) >= 0) bubbleCfg.align = cfg.bubble.align;
+    }
+
+    /* 自定义台词 / 语音（本页是 v1，只吃 v1 那一套） */
+    CUSTOM_LINES = cleanLineMap(cfg.lines && cfg.lines.v1);
+    VOICES = cleanVoiceMap(cfg.voices && cfg.voices.v1);
+
+    var m = cfg.mapping && cfg.mapping['v1'];      // 本页是 v1，只吃 v1 那一套映射
+    if (m) {
+      Object.keys(m).forEach(function (k) {
+        if (!MAP[k] || !Array.isArray(m[k])) return;
+        var arr = m[k].filter(function (id) { return SPR_IDS.indexOf(id) >= 0; });
+        if (arr.length) { MAP[k].sprs = arr; cycle[k] = 0; }
+      });
+    }
+    render(false);
+  }
+
+  /** 台词表清洗：{ mode: ['…','…'] }，去掉空串；无有效项则该状态回落内置台词 */
+  function cleanLineMap(src) {
+    var out = {};
+    if (!src || typeof src !== 'object') return out;
+    Object.keys(src).forEach(function (k) {
+      if (!Array.isArray(src[k])) return;
+      var arr = src[k].map(function (x) { return String(x == null ? '' : x).trim(); })
+        .filter(function (x) { return x.length > 0; });
+      if (arr.length) out[k] = arr;
+    });
+    return out;
+  }
+
+  /** 语音表清洗：{ mode: [{file,text}] }；也接受 ['a.mp3'] 这种简写 */
+  function cleanVoiceMap(src) {
+    var out = {};
+    if (!src || typeof src !== 'object') return out;
+    Object.keys(src).forEach(function (k) {
+      if (!Array.isArray(src[k])) return;
+      var arr = src[k].map(function (x) {
+        if (typeof x === 'string') return { file: x, text: '' };
+        if (x && typeof x === 'object') return { file: String(x.file || ''), text: String(x.text || '') };
+        return null;
+      }).filter(function (x) { return x && (x.file || x.text); });
+      if (arr.length) out[k] = arr;
+    });
+    return out;
+  }
+
+  /* 宿主模式：Electron 注入 window.petHost 时只留桌宠；?pet=1 可在浏览器里手动预览 */
+  if (window.petHost && typeof window.petHost.onState === 'function') {
+    document.body.classList.add('pet-only');
+    window.petHost.onState(function (p) { setState(p); });   // 主进程推送的任务状态
+    if (typeof window.petHost.onConfig === 'function') window.petHost.onConfig(applyConfig);
+    if (typeof window.petHost.onChime === 'function') window.petHost.onChime(playChime);   // 整点播报
+  } else if (/[?&]pet=1/.test(location.search)) {
+    document.body.classList.add('pet-only');
+  }
+
+  /* 口径胶囊可点：一键从「全部会话」切回「仅当前会话」 */
+  els.pillScope.addEventListener('click', function () {
+    if (state.scope !== 'all') return;
+    state.scope = 'current';
+    if (HOSTED && window.petHost && typeof window.petHost.setScope === 'function') {
+      window.petHost.setScope('current');
+    }
+    render(false);
+  });
+
+  buildMapUI();
+  buildGallery();
+  buildReactUI();
+  bindInteract();
+  render(true);
+  scheduleBlink();
+
+  setInterval(function () {
+    if (react && react.until <= Date.now()) react = null;
+    render(false);
+  }, 1000);
+
+  // 多表情轮播（反应进行中不轮播）
+  setInterval(function () {
+    if (liveReact()) return;
+    var mode = resolveMode(state);
+    var arr = MAP[mode].sprs;
+    if (arr && arr.length > 1) {
+      cycle[mode] = ((cycle[mode] || 0) + 1) % arr.length;
+      render(false);
+    }
+  }, CYCLE_MS);
+})();
+</script>
+</body>
+</html>

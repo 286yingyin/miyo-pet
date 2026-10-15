@@ -1,0 +1,71 @@
+# 美代桌宠 · electron-builder 配置（产出单文件便携 exe）
+# ---------------------------------------------------------------------------
+# 用法：  cd electron && npx electron-builder --win portable --x64
+# 产物：  dist-single/miyo-pet-<version>-portable.exe
+#
+# 两个关键点：
+#  1) electronDist 指向本地已下好的运行时，避免 electron-builder 重新下载 Electron
+#  2) 应用资源（scripts/ 与 prototype/）用 extraResources 放到 resources/app-root/，
+#     因为 main.js/paths.js 是按「appRoot() 下同时有 scripts 与 prototype」来定位的；
+#     如果塞进 asar，相对层级会被拍平，页面与脚本都会找不到。
+# ---------------------------------------------------------------------------
+appId: com.miyo.pet
+productName: miyo-pet
+copyright: Copyright © 2026 miyo-pet contributors
+electronVersion: 33.4.11
+electronDist: node_modules/electron/dist
+
+directories:
+  # 输出到独立目录。原因：构建开头要 emptyDir 目标目录，而沙箱的 safe-delete 护栏
+  # 会拦住「单目录 >50 条目」的删除（第二次构建时 resources 里有 115 个文件就会触发）。
+  # 用一个还没被构建过的目录，就没有可删的东西。
+  output: ../dist-stage12
+  buildResources: .
+
+files:
+  - main.js
+  - preload.js
+  - paths.js
+  - icon.png
+  - package.json
+
+extraResources:
+  - from: ../scripts
+    to: app-root/scripts
+    filter:
+      - '**/*.js'
+      - '!check.js'
+      - '!test-status.js'
+      - '!ix-test.js'
+      - '!build-exe.js'
+      - '!build-portable.js'
+      - '!status-provider.js'
+  - from: ../prototype/v1
+    to: app-root/prototype/v1
+    filter:
+      - '!**/*.atlas'
+      - '!packs/**'   # 0.3.23：其他学生差分包不入分发产物
+  - from: ../prototype/v2
+    to: app-root/prototype/v2
+    filter:
+      - '!spine-webgl.js'
+      - '!render.html'
+      - '!preview.html'
+      - '!**/*.atlas'
+      - '!packs/**'   # 0.3.23：其他学生差分包不入分发产物
+  - from: ../prototype/voices
+    to: app-root/prototype/voices
+
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+  icon: icon.ico    # 预生成的 ico（PIL 产出）。不要改回 icon.png：png→ico 走 WASM 转换器，
+                    # 本机内存受限时会 WebAssembly.Memory 分配失败（2026-10-12 实测）
+
+portable:
+  artifactName: miyo-pet-${version}-portable.exe
+
+# 不做代码签名（本机没有证书，且签名工具需要额外下载）
+forceCodeSigning: false

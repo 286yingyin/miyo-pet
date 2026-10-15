@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>美代完整立绘 · Spine 渲染导出</title>
+<!--
+  用官方 Spine 4.2 runtime 渲染 CH0317_spr 的 41 个动画（= 41 张完整立绘），
+  导出 905x2477 透明 PNG 并回传到本地服务。
+  素材版权归 NEXON Games 及官方所有，仅供个人使用，请勿用于商业目的。
+-->
+<style>
+  html,body{margin:0;padding:0;background:#20262f;font-family:ui-monospace,Consolas,monospace;}
+  #wrap{display:flex;gap:14px;padding:12px;}
+  #c{width:302px;height:826px;background:
+      repeating-conic-gradient(#3a424e 0% 25%, #2b323c 0% 50%) 50%/18px 18px;
+      border:1px solid #4a5461;border-radius:6px;}
+  #log{color:#cfe0f0;font-size:11.5px;line-height:1.7;white-space:pre-wrap;
+       background:#161b21;border:1px solid #333c47;border-radius:6px;
+       padding:10px 12px;width:560px;max-height:820px;overflow:auto;}
+  .ok{color:#7fd18f}.err{color:#f08a8a}.dim{color:#7c8794}
+  #bar{margin:0 0 8px}
+  button{font-family:inherit;font-size:12px;padding:6px 12px;border-radius:6px;
+         border:1px solid #4a5461;background:#2b323c;color:#cfe0f0;cursor:pointer;}
+  button:hover{background:#37414e}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="905" height="2477"></canvas>
+  <div>
+    <div id="bar"><button id="btnRun">重新渲染并导出</button></div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script src="./spine-webgl.js"></script>
+<script>
+(function () {
+  'use strict';
+  var logEl = document.getElementById('log');
+  function log(msg, cls) {
+    var d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = msg;
+    logEl.appendChild(d);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  var CW = 905, CH = 2477;
+  var BASE = './assets/spine/';
+  var RECV = 'http://127.0.0.1:8899/save';
+
+  window.__state = { loaded: false, count: 0, sent: 0, names: [], error: null, step: 'init' };
+
+  var canvas, gl, renderer, skeleton, skeletonData, animState, texture, transform;
+
+  function fail(e) {
+    var m = (e && e.message) ? e.message : String(e);
+    window.__state.error = m;
+    log('X ' + m, 'err');
+  }
+
+  function setup() {
+    canvas = document.getElementById('c');
+    gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true })
+      || canvas.getContext('experimental-webgl', { alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
+    if (!gl) { fail('WebGL 不可用'); return false; }
+    log('WebGL OK: ' + gl.getParameter(gl.VERSION), 'ok');
+    // 关键：twoColorTint 必须显式设为 false，否则顶点格式与标准骨骼数据不匹配
+    renderer = new spine.SceneRenderer(canvas, gl, false);
+    log('SceneRenderer 就绪 (twoColorTint=false)', 'ok');
+    return true;
+  }
+
+  function fetchText(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' @ ' + url);
+      return r.text();
+    });
+  }
+  function fetchBuf(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' @ ' + url);
+      return r.arrayBuffer();
+    });
+  }
+  function loadImage(url) {
+    return new Promise(function (res, rej) {
+      var i = new Image();
+      i.onload = function () { res(i); };
+      i.onerror = function () { rej(new Error('图片加载失败 ' + url)); };
+      i.src = url;
+    });
+  }
+
+  function load() {
+    window.__state.step = 'loading';
+    log('开始加载资源…');
+    return Promise.all([
+      fetchText(BASE + 'CH0317_spr.atlas'),
+      fetchBuf(BASE + 'CH0317_spr.skel'),
+      loadImage(BASE + 'CH0317_spr.png')
+    ]).then(function (r) {
+      var atlasText = r[0], skelBuf = r[1], img = r[2];
+      log('atlas ' + atlasText.length + ' 字符 / skel ' + skelBuf.byteLength + ' 字节 / 贴图 ' + img.width + 'x' + img.height, 'ok');
+
+      texture = new spine.GLTexture(gl, img);
+      var atlas = new spine.TextureAtlas(atlasText, function () { return texture; });
+      log('TextureAtlas 区域数: ' + atlas.regions.length);
+
+      var loader = new spine.AtlasAttachmentLoader(atlas);
+      var sbin = new spine.SkeletonBinary(loader);
+      skeletonData = sbin.readSkeletonData(new Uint8Array(skelBuf));
+
+      skeleton = new spine.Skeleton(skeletonData);
+      // 关键：显式挂上 skin，否则 slot.attachment 可能为空
+      if (skeletonData.skins.length > 0) skeleton.setSkin(skeletonData.skins[0]);
+      skeleton.setSlotsToSetupPose();
+
+      animState = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+
+      window.__state.loaded = true;
+      window.__state.count = skeletonData.animations.length;
+      window.__state.names = skeletonData.animations.map(function (a) { return a.name; });
+      window.__state.step = 'loaded';
+      log('Spine ' + skeletonData.version + ' / 动画 ' + skeletonData.animations.length + ' 个', 'ok');
+      log('skin=' + (skeleton.skin ? skeleton.skin.name : '(null)')
+        + ' / 骨骼 ' + skeletonData.bones.length + ' / 槽位 ' + skeletonData.slots.length, 'dim');
+    });
+  }
+
+  // 统一变换：以 setup pose 的 AABB 为准（41 张差分是同一姿势的不同表情，bounds 稳定）
+  function computeTransform() {
+    skeleton.setToSetupPose();
+    skeleton.setSlotsToSetupPose();
+    skeleton.updateWorldTransform(spine.Physics.update);
+    var r = skeleton.getBoundsRect();
+    if (!r || !isFinite(r.width) || r.width <= 0) { fail('无法计算 setup bounds'); return null; }
+    var pad = 0.985;
+    var s = Math.min(CW * pad / r.width, CH * pad / r.height);
+    var cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    log('setup bounds ' + r.width.toFixed(1) + ' x ' + r.height.toFixed(1) + ' / 缩放 ' + s.toFixed(4), 'dim');
+    window.__state.bounds = [Math.round(r.width), Math.round(r.height)];
+    return { s: s, cx: cx, cy: cy };
+  }
+
+  function renderOne(name, tf) {
+    // 每次都完整重置，避免上一张的状态残留
+    skeleton.setToSetupPose();
+    skeleton.setSlotsToSetupPose();
+    animState.setAnimation(0, name, false);
+    animState.apply(skeleton);
+    skeleton.updateWorldTransform(spine.Physics.update);
+
+    // 把骨架搬运到画布坐标系中心
+    skeleton.scaleX = tf.s;
+    skeleton.scaleY = tf.s;
+    skeleton.x = -tf.cx * tf.s;
+    skeleton.y = -tf.cy * tf.s;
+    skeleton.updateWorldTransform(spine.Physics.update);
+
+    gl.viewport(0, 0, CW, CH);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    renderer.camera.position.set(0, 0, 100);
+    renderer.camera.direction.set(0, 0, -1);
+    renderer.camera.up.set(0, 1, 0);
+    renderer.camera.near = 0;
+    renderer.camera.far = 1000;
+    renderer.camera.zoom = 1;
+    renderer.camera.viewportWidth = CW;
+    renderer.camera.viewportHeight = CH;
+    renderer.camera.update();
+
+    renderer.begin();
+    renderer.drawSkeleton(skeleton, false);
+    renderer.end();
+
+    if (!window.__state.diag) {
+      try {
+        var px = new Uint8Array(4), hits = 0;
+        for (var ty = 0; ty < 6; ty++) {
+          for (var tx = 0; tx < 6; tx++) {
+            gl.readPixels(Math.floor(CW * (tx + 0.5) / 6), Math.floor(CH * (ty + 0.5) / 6),
+                          1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+            if (px[3] > 0) hits++;
+          }
+        }
+        var rb = skeleton.getBoundsRect();
+        window.__state.diag = {
+          nonEmptySamples: hits,
+          skelAfter: [Math.round(rb.x), Math.round(rb.y), Math.round(rb.width), Math.round(rb.height)],
+          glError: gl.getError()
+        };
+      } catch (e) {
+        window.__state.diag = { err: String(e) };
+      }
+    }
+  }
+
+  function run() {
+    if (!window.__state.loaded) { fail(new Error('资源未就绪')); return Promise.resolve(); }
+    transform = transform || computeTransform();
+    if (!transform) return Promise.resolve();
+
+    var names = window.__state.names;
+    log('开始导出 ' + names.length + ' 张…');
+    window.__state.step = 'rendering';
+    window.__state.sent = 0;
+    var i = 0;
+
+    function next() {
+      if (i >= names.length) {
+        window.__state.step = 'done';
+        log('全部完成：已发送 ' + window.__state.sent + ' / ' + names.length, 'ok');
+        return Promise.resolve();
+      }
+      var name = names[i];
+      try {
+        renderOne(name, transform);
+        var url = canvas.toDataURL('image/png');
+        window.__state.sent++;
+        fetch(RECV, { method: 'POST', mode: 'no-cors', body: name + '.png|' + url })
+          .catch(function () {});
+        log('  [' + (i + 1) + '/' + names.length + '] ' + name + '  ' + Math.round(url.length / 1024) + ' KB');
+      } catch (e) {
+        log('  X ' + name + ' 渲染失败: ' + e.message, 'err');
+      }
+      i++;
+      return new Promise(function (r) { setTimeout(r, 60); }).then(next);
+    }
+    return next();
+  }
+
+  document.getElementById('btnRun').addEventListener('click', function () {
+    transform = null;
+    window.__state.diag = null;
+    run().catch(fail);
+  });
+
+  window.__run = run;
+
+  try {
+    if (setup()) {
+      load().then(function () { return run(); }).catch(fail);
+    }
+  } catch (e) {
+    fail(e);
+  }
+})();
+</script>
+</body>
+</html>

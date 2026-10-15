@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美代完整立绘 · 41 张预览与标签</title>
+<!--
+  完整立绘（905x2477 全身透明 PNG）预览页
+  标签沿用 v1 半身差分那份，不重复标注
+  素材版权归 NEXON Games 及官方所有，仅供个人使用，请勿用于商业目的。
+-->
+<style>
+  :root{
+    --bg:#eef2f7; --card:#fff; --ink:#1e2430; --ink2:#5a6473; --ink3:#8d97a6;
+    --line:#e2e7ef; --miyo:#7fc98f; --miyo-deep:#4f9c66; --miyo-soft:#eaf7ee;
+    --warn:#d99a3c; --radius:12px;
+    --shadow:0 1px 2px rgba(24,38,60,.05), 0 6px 18px rgba(24,38,60,.06);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+       background:var(--bg); color:var(--ink); font-size:13.5px; line-height:1.6;
+       -webkit-font-smoothing:antialiased;}
+  header{position:sticky; top:0; z-index:20; background:rgba(238,242,247,.94);
+         backdrop-filter:blur(8px); border-bottom:1px solid var(--line); padding:16px 24px 14px;}
+  h1{margin:0; font-size:17px; font-weight:700;}
+  .sub{color:var(--ink3); font-size:12.5px; margin-top:3px;}
+  .filters{display:flex; gap:7px; flex-wrap:wrap; margin-top:11px;}
+  .filters button{font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:8px; padding:5px 11px; transition:.15s;}
+  .filters button:hover{border-color:var(--miyo); color:var(--miyo-deep); background:var(--miyo-soft);}
+  .filters button.sel{background:var(--miyo); border-color:var(--miyo); color:#fff;}
+  .filters button.off{background:var(--warn); border-color:var(--warn); color:#fff;}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
+        gap:14px; padding:18px 24px 60px;}
+  .item{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+        box-shadow:var(--shadow); overflow:hidden; transition:.18s;}
+  .item:hover{box-shadow:0 2px 4px rgba(24,38,60,.06), 0 12px 28px rgba(24,38,60,.10);}
+  .thumb{position:relative; aspect-ratio:905/2477; background:
+     repeating-conic-gradient(#f3f5f9 0% 25%, #e9edf3 0% 50%) 50%/16px 16px;
+     display:flex; align-items:center; justify-content:center; overflow:hidden;}
+  .thumb img{width:100%; height:100%; object-fit:contain; object-position:top center;}
+  .id{position:absolute; left:7px; top:7px; background:rgba(30,36,48,.78); color:#fff;
+      font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px;}
+  .off{position:absolute; right:7px; top:7px; background:var(--miyo-soft); color:var(--miyo-deep);
+       font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:6px;
+       border:1px solid rgba(127,201,143,.4);}
+  .body{padding:9px 11px 11px;}
+  .tag{font-size:13px; font-weight:700; color:var(--miyo-deep);}
+  .tag.none{color:#b6bfcb; font-weight:600;}
+  .note{font-size:11.5px; color:var(--ink3); margin-top:3px; line-height:1.5;
+        max-height:3em; overflow:hidden;}
+  .mark{font-size:11px; color:var(--warn); margin-top:4px;}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>美代 · 完整立绘 41 张</h1>
+  <div class="sub">
+    905 × 2477 全身透明 PNG · 取自 kivo.wiki 立绘鉴赏页 · 标签沿用半身差分那份（共 <b>38 / 40</b> 已标注）
+  </div>
+  <div class="filters" id="filters"></div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var IDS = [];
+  for (var i = 0; i <= 37; i++) { IDS.push(i < 10 ? '0' + i : String(i)); }
+  IDS.push('99', 'Eye_Close_01', 'Idle_01');
+
+  var OFFICIAL = { '00':'default','01':'normal','02':'respond','03':'smile',
+                   '04':'embarassed','05':'serious','06':'depressed' };
+  var OFFICIAL_CN = { 'default':'默认','normal':'普通','respond':'回应','smile':'微笑',
+                      'embarassed':'害羞','serious':'认真','depressed':'沮丧' };
+
+  // 标签（来自 prototype/labels.json）
+  var LABELS = {
+    '00':['困惑','1','有点困惑、苦恼的表情，略微皱眉'],
+    '01':['平静','1','平常的表情，但是眉毛舒缓一点'],
+    '02':['平静','2','开口说话的表情，想要说些什么的表情'],
+    '03':['开心','1','微笑'],
+    '04':['困惑','2','有些苦恼困惑的表情，不擅应当的表情'],
+    '05':['生气','1','有点小生气的表情'],
+    '06':['难过','2','有些难过的表情'],
+    '07':['开心','1','有些开心的表情，跟微笑类似'],
+    '08':['困惑','1','带点苦笑的表情'],
+    '09':['得意','1','略微得意的表情'],
+    '10':['开心','1','微笑表情的闭眼版'],
+    '11':['得意','2','哼哼，有些得意的表情'],
+    '12':['开心','2','有些开心的表情'],
+    '13':['开心','3','非常开心的表情'],
+    '14':['开心','3','超级开心的表情'],
+    '15':['生气','2','很明显的生气了的表情，斥责的表情'],
+    '16':['生气','3','翻白眼，看样子非常生气的表情'],
+    '17':['生气','3','翻白眼，同时还翘嘴，非常生气的表情'],
+    '18':['生气','2','气鼓鼓的表情，像是撒娇一样'],
+    '19':['疲惫','2','唉声叹气'],
+    '20':['生气','1','略微不满的表情'],
+    '21':['困惑','2','有些苦恼的表情，流汗'],
+    '22':['困惑','3','非常苦恼的样子，不能够应对的表情'],
+    '23':['惊讶','1','有点惊讶的表情'],
+    '24':['惊讶','2','大吃一惊的表情'],
+    '25':['惊讶','3','非常惊讶，被惊讶到整个人完全呆住的表情'],
+    '26':['惊讶','3','非常惊讶，还没到整个人完全呆住的表情'],
+    '27':['难过','2','明显难过的表情，快要流泪的样子，也可以非常苦恼的样子'],
+    '28':['困惑','2','可以非常苦恼的样子，流汗'],
+    '29':['害羞','1','有点害羞的表情，偷偷移开视线'],
+    '30':['害羞','2','有些害羞的表情，被夸奖了'],
+    '31':['害羞','2','有些害羞的表情，害羞得移开视线了'],
+    '32':['难过','1','有点难过的表情'],
+    '33':['难过','3','非常难过的表情，流泪了'],
+    '34':['开心','3','非常开心的表情，闭眼舒畅的笑'],
+    '36':['认真','1','移开目光，像是在想什么事情'],
+    '99':['平静','2','平常的表情，闭眼'],
+    'Idle_01':['平静','1','平常的表情']
+  };
+
+  // 主状态机用到的
+  var MAPPED = { 'Idle_01':'待机', '36':'处理中', '24':'待确认', '13':'全部完成',
+                 '20':'空闲5-15分', '18':'空闲15-30分', '16':'空闲30分以上' };
+
+  var DIR = './assets/full/';
+  var grid = document.getElementById('grid');
+  var filterBar = document.getElementById('filters');
+  var curFilter = 'all';
+
+  var EMOS = ['开心','平静','困惑','生气','难过','惊讶','害羞','得意','疲惫','认真'];
+
+  IDS.forEach(function (id) {
+    var lb = LABELS[id];
+    var it = document.createElement('div');
+    it.className = 'item';
+    it.setAttribute('data-emo', lb ? lb[0] : '__none');
+
+    var off = OFFICIAL[id];
+    it.innerHTML =
+      '<div class="thumb">' +
+        '<img src="' + DIR + id + '.png" alt="' + id + '" loading="lazy">' +
+        '<span class="id">' + id + '</span>' +
+        (off ? '<span class="off">' + off + '</span>' : '') +
+      '</div>' +
+      '<div class="body">' +
+        (lb ? '<div class="tag">' + lb[0] + lb[1] + '级</div>'
+            : '<div class="tag none">未标注</div>') +
+        (off ? '<div class="note" style="color:#4f9c66">官方：' + OFFICIAL_CN[off] + '</div>' : '') +
+        '<div class="note">' + (lb ? lb[2] : '') + '</div>' +
+        (MAPPED[id] ? '<div class="mark">◆ 状态机：' + MAPPED[id] + '</div>' : '') +
+      '</div>';
+    grid.appendChild(it);
+  });
+
+  function buildFilters() {
+    var mk = function (key, label, cls) {
+      var b = document.createElement('button');
+      b.textContent = label;
+      b.setAttribute('data-f', key);
+      if (cls) b.className = cls;
+      if (key === 'all') b.className += ' sel';
+      b.addEventListener('click', function () {
+        curFilter = key;
+        var bs = filterBar.querySelectorAll('button');
+        for (var i = 0; i < bs.length; i++) bs[i].classList.remove('sel');
+        b.classList.add('sel');
+        apply();
+      });
+      filterBar.appendChild(b);
+    };
+    mk('all', '全部 41');
+    mk('__none', '未标注 2', 'off');
+    mk('__mapped', '状态机用 7');
+    EMOS.forEach(function (e) { mk(e, e); });
+  }
+
+  function apply() {
+    var items = grid.querySelectorAll('.item');
+    var cats = {};
+    EMOS.forEach(function (e) { cats[e] = 0; });
+    for (var i = 0; i < items.length; i++) {
+      var emo = items[i].getAttribute('data-emo');
+      var show = true;
+      if (curFilter === '__none') show = (emo === '__none');
+      else if (curFilter === '__mapped') {
+        var id = items[i].querySelector('.id').textContent;
+        show = !!MAPPED[id];
+      } else if (curFilter !== 'all') show = (emo === curFilter);
+      items[i].classList.toggle('hidden', !show);
+    }
+  }
+
+  buildFilters();
+})();
+</script>
+</body>
+</html>

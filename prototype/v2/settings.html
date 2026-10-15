@@ -1,0 +1,3078 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美代桌宠 · 设置</title>
+<!--
+  ============================================================================
+  美代桌宠 · 设置窗口
+  ----------------------------------------------------------------------------
+  由主进程（右键菜单 →「设置…」）打开，通过 window.petHost 读写配置。
+  左列（折叠面板）：
+    外观与行为 / 显示指标 / 气泡 / 表情 · 台词 · 语音 / 整点播报 / 最近变化
+  右列（吸顶）：
+    大图预览区 + 差分图库（单击缩略图 = 加入或移出当前状态；悬停 = 上方看大图）
+
+  交互约定（别改坏了）：
+    · 单击缩略图 = 追加 / 移除（toggle）到「当前选中状态」
+    · 悬停缩略图 = 上方大图预览
+    · 「设为当前状态首图」= 把该图排到第一位（优先展示）
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#eef2f7; --card:#fff; --ink:#1e2430; --ink-2:#5a6473; --ink-3:#8d97a6;
+    --line:#e2e7ef; --miyo:#7fc98f; --miyo-deep:#4f9c66; --miyo-soft:#eaf7ee;
+    --warn:#d99a3c; --warn-soft:#fdf4e5; --radius:14px;
+    --shadow:0 1px 2px rgba(24,38,60,.05), 0 8px 24px rgba(24,38,60,.07);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{padding-bottom:64px; /* 给底部悬浮保存栏留位（0.3.2） */
+        font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+       background:var(--bg); color:var(--ink); font-size:14px; line-height:1.65;}
+  .top{display:flex; align-items:baseline; gap:10px; padding:16px 20px 10px;}
+  .top h1{margin:0; font-size:17px; font-weight:700;}
+  .top .sub{color:var(--ink-3); font-size:12px;}
+  .wrap{padding:0 20px 20px; display:grid; grid-template-columns:minmax(0,1fr) 500px; gap:14px; align-items:start;}
+  @media (max-width:980px){ .wrap{grid-template-columns:1fr;} .side{position:static !important;} }
+
+  /* ---------- 折叠面板 ---------- */
+  details.card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+               box-shadow:var(--shadow); margin-bottom:12px; overflow:hidden;}
+  details.card > summary{cursor:pointer; padding:12px 16px; font-size:13px; font-weight:700;
+                         display:flex; align-items:center; gap:8px; list-style:none; user-select:none;}
+  details.card > summary::-webkit-details-marker{display:none;}
+  details.card > summary::before{content:""; width:3px; height:13px; border-radius:2px; background:var(--miyo);}
+  details.card > summary::after{content:"▾"; margin-left:auto; color:var(--ink-3); font-size:11px;
+                                transition:transform .15s ease;}
+  details.card[open] > summary::after{transform:rotate(180deg);}
+  details.card > .body{padding:0 16px 14px;}
+
+  .row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0;}
+  .row+.row{border-top:1px dashed var(--line);}
+  .row .lbl{font-size:13px; color:var(--ink-2);}
+  .hint{color:var(--ink-3); font-size:11.5px; line-height:1.6;}
+  .btn{border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:9px;
+       padding:6px 12px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;}
+  .btn:hover{border-color:var(--miyo); color:var(--miyo-deep); background:var(--miyo-soft);}
+  .btn.primary{background:var(--miyo); border-color:var(--miyo); color:#fff;}
+  .btn.primary:hover{background:var(--miyo-deep); border-color:var(--miyo-deep); color:#fff;}
+  .btn.sm{padding:3px 9px; font-size:11.5px;}
+  .btn[disabled]{opacity:.45; cursor:not-allowed;}
+  .seg{display:flex; border:1px solid var(--line); border-radius:9px; overflow:hidden;}
+  .seg button{border:0; background:#fff; color:var(--ink-2); padding:6px 12px;
+              font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;}
+  .seg button.on{background:var(--miyo); color:#fff;}
+  input[type=range]{width:150px; vertical-align:middle;}
+  input[type=checkbox]{width:16px; height:16px;}
+  input[type=text],input[type=number],textarea{font-family:inherit; font-size:12.5px; color:var(--ink);
+      border:1px solid var(--line); border-radius:8px; padding:6px 9px; background:#fbfcfe; width:100%;}
+  textarea{resize:vertical; line-height:1.6;}
+  .val{font-variant-numeric:tabular-nums; font-weight:700; min-width:52px; display:inline-block; text-align:right;}
+
+  /* ---------- 表情 / 台词 ---------- */
+  .mapitem{padding:10px 0; border-top:1px dashed var(--line);}
+  .mapitem:first-child{border-top:0;}
+  .maphead{display:flex; align-items:center; gap:10px;}
+  .maphead .lbl{flex:0 0 84px; font-size:12.5px; color:var(--ink-2); font-weight:600;}
+  .chips{flex:1; display:flex; flex-wrap:wrap; gap:5px; align-items:center;}
+  .chip{display:inline-flex; align-items:center; gap:4px; background:var(--miyo-soft); color:var(--miyo-deep);
+        border:1px solid rgba(127,201,143,.45); border-radius:7px; padding:2px 4px 2px 7px;
+        font-size:11.5px; font-weight:600;}
+  .chip.cur{background:var(--miyo); border-color:var(--miyo); color:#fff;}
+  .chip button{border:0; background:none; color:inherit; cursor:pointer; font-size:13px;
+               line-height:1; padding:0 1px; opacity:.55; font-family:inherit;}
+  .chip button:hover{opacity:1;}
+  .adder{font-family:inherit; font-size:11.5px; padding:3px 5px; border:1px dashed var(--line);
+         border-radius:7px; background:#fbfcfe; color:var(--ink-2); max-width:86px; cursor:pointer;}
+  .mapthumbs{display:flex; flex-wrap:wrap; gap:4px; margin:7px 0 4px; padding-left:94px; min-height:34px;}
+  .mapthumbs img{width:64px; height:64px; object-fit:contain; object-position:top center;
+                 border:1px solid var(--line); border-radius:6px; background:#fff;}
+  .mapthumbs img.sq{object-fit:cover;}
+  .maptools{display:flex; gap:8px; padding-left:94px;}
+  .maptools textarea{flex:1;}
+  .maptools .col{flex:1; display:flex; flex-direction:column; gap:5px; min-width:0;}
+
+  /* ---------- 整点播报 ---------- */
+  .hours{display:grid; grid-template-columns:repeat(12,1fr); gap:4px; margin:6px 0 10px;}
+  .hour{border:1px solid var(--line); background:#fff; border-radius:7px; padding:5px 0;
+        font-size:11.5px; font-weight:700; color:var(--ink-3); cursor:pointer; font-family:inherit;
+        font-variant-numeric:tabular-nums;}
+  .hour.on{background:var(--miyo-soft); border-color:rgba(127,201,143,.6); color:var(--miyo-deep);}
+  .hour.sel{outline:2px solid var(--miyo); outline-offset:1px;}
+  .houredit{border-top:1px dashed var(--line); padding-top:9px;}
+
+  /* ---------- 右列：预览 + 图库 ---------- */
+  .side{position:sticky; top:14px;}
+  .pv{position:relative; border:1px solid var(--line); border-radius:12px; background:
+        linear-gradient(158deg,#eef3f9,#dfe8f3); min-height:460px;
+        display:flex; align-items:center; justify-content:center; overflow:hidden;}
+  .pv img{max-width:100%; max-height:460px; object-fit:contain; object-position:bottom center;}
+  /* 0.3.19：双形态 —— 宿主移除差分图库（保流畅）；网页导出副本 = 纯差分浏览页 */
+  body.host-mode #galleryCard{display:none !important;}
+  body.web-only .card:not(#galleryCard){display:none !important;}
+  body.web-only #savebar{display:none !important;}
+  /* 0.3.20：差分浏览页双列布局 —— 左列预览，右列控件+缩略图 */
+  body.web-only .wrap{display:flex; gap:16px; align-items:flex-start;}
+  body.web-only .wrap > .side{flex:0 0 460px; margin-left:auto;}
+  #pvPane{flex:1; position:sticky; top:12px; min-width:0;}
+  #pvPane .pv img{max-height:82vh; width:auto; max-width:100%;}
+  #pvCtl input[type=range]{width:150px !important;}
+  body.web-only #pvCtl{display:flex; flex-wrap:wrap; gap:4px 10px; align-items:center;}
+  .pv img{transition:transform .12s ease-out; will-change:transform;}
+  .pv .meta{position:absolute; left:8px; bottom:6px; right:8px; display:flex; align-items:center; gap:6px;
+            background:rgba(255,255,255,.86); border-radius:8px; padding:3px 8px; font-size:11.5px;
+            color:var(--ink-2); font-variant-numeric:tabular-nums;}
+  .pv .meta b{color:var(--ink); font-weight:700;}
+  .pv .meta .btn{margin-left:auto;}
+  .gal{display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:8px;
+       max-height:400px; overflow-y:auto; padding-right:4px; margin-top:9px;}
+  .gal img{width:100%; border-radius:8px; border:1.5px solid var(--line); background:#fff;
+           cursor:pointer; object-fit:contain; object-position:top center; transition:border-color .12s;}
+  .gal img.spr{aspect-ratio:1/1; object-fit:cover;}
+  .gal img:hover{border-color:var(--miyo);}
+  .gal img.in{border-color:#c9a86a; box-shadow:0 0 0 2px rgba(201,168,106,.3);}
+
+  /* ---------- 最近变化 ---------- */
+  .hist{max-height:220px; overflow-y:auto; font-size:11.5px; margin-top:6px;}
+  .hist table{width:100%; border-collapse:collapse;}
+  .hist th{text-align:left; color:var(--ink-3); font-weight:600; padding:4px 6px;
+           border-bottom:1px solid var(--line); position:sticky; top:0; background:#fff;}
+  .hist td{padding:4px 6px; border-bottom:1px dashed var(--line); color:var(--ink-2); vertical-align:top;}
+  .hist td.t{white-space:nowrap; color:var(--ink-3); font-variant-numeric:tabular-nums;}
+  .hist td.k{color:var(--ink); font-weight:600; white-space:nowrap;}
+  .hist .empty{color:var(--ink-3); padding:10px 2px;}
+
+  .foot{padding:0 20px 18px; color:var(--ink-3); font-size:11.5px;}
+  .status{font-size:12px; color:var(--miyo-deep); font-weight:600;}
+  .status.err{color:#c0504d;}
+  .warnbox{background:var(--warn-soft); border:1px solid #eacf9b; border-radius:9px;
+           padding:7px 10px; font-size:11.5px; color:#8a5f1f; margin-top:6px;}
+  .dim{opacity:.6;}
+
+  /* 0.3.2：保存 / 恢复默认 悬浮在左下角，不随页面滚动消失（按钮节点由 JS 移入） */
+  .savebar{position:fixed; left:14px; bottom:14px; z-index:60;
+           display:flex; gap:8px; align-items:center;
+           background:var(--card,#fff); border:1px solid var(--line,#e2e7ef); border-radius:10px;
+           padding:8px 12px; box-shadow:0 6px 18px rgba(24,40,70,.16);}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>美代桌宠 · 设置</h1>
+  <span class="sub">改完点「保存」即刻生效，桌宠不用重启</span>
+</div>
+
+<div class="wrap">
+  <div>
+
+    <!-- ================= 外观与行为 ================= -->
+    <details class="card" open>
+      <summary>外观与行为</summary>
+      <div class="body">
+        <div class="row">
+          <span class="lbl">桌宠版本</span>
+          <div class="seg" id="segMode">
+            <button data-mode="v1">v1 · 半身差分</button>
+            <button data-mode="v2">v2 · 全身立绘</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="lbl">差分系列（v1/v2 共用）</span>
+          <select id="serSel" class="adder" style="max-width:220px;"></select>
+        </div>
+        <div class="hint" id="serNote">
+          切换学生后：**默认差分全部重置为 01**（美代专属差分不会残留），映射与闲置差分清空，
+          桌宠大小切到该学生的倍率。系列里缺的编号会自动回退美代默认图；
+          立绘比例不同时会在窗口内自动适配高度，不会被裁切。
+          <b>新增学生</b>：把差分 PNG（文件名 = 差分编号）放到 <b>exe 同目录 packs/v1/、packs/v2/</b>
+          的系列文件夹里（附 manifest.json 写中文名），重启设置页即可在下拉中出现。
+        </div>
+
+        <div class="row">
+          <span class="lbl">桌宠大小</span>
+          <div>
+            <input type="range" id="scale" min="0.5" max="5" step="0.1">
+            <span class="val" id="scaleVal">1.00×</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="lbl">始终置顶</span>
+          <input type="checkbox" id="top">
+        </div>
+
+        <div class="row">
+          <span class="lbl">省内存立绘</span>
+          <input type="checkbox" id="lowMem">
+        </div>
+        <div class="hint" id="lowMemNote">
+          开（默认）：立绘用 400px 低分辨率副本渲染，解码内存约降 92%（原尺寸是显示尺寸的 4.6 倍，肉眼几乎无差）。
+          关：用 905×2477 原图（更清晰，但内存明显升高）。
+        </div>
+
+        <div class="row">
+          <span class="lbl">统计范围</span>
+          <div class="seg" id="segScope">
+            <button data-scope="current">仅当前会话</button>
+            <button data-scope="all">全部会话</button>
+          </div>
+        </div>
+        <div class="hint" id="scopeNote">
+          只统计「当前会话」时，桌宠的数字与 WorkBuddy 界面看到的一致。
+        </div>
+
+        <div class="row">
+          <span class="lbl">语音音量</span>
+          <div>
+            <input type="range" id="volume" min="0" max="1" step="0.05">
+            <span class="val" id="volumeVal">100%</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="lbl">重播冷却</span>
+          <div>
+            <input type="number" id="restMs" min="0" max="3600" step="5" style="width:76px; display:inline-block;">
+            <span class="val" id="restMsVal">60 秒</span>
+          </div>
+        </div>
+        <div class="hint" id="restMsNote">
+          台本播完后隔多久重新播（状态台本休息期的长度；0 = 立即重播）。
+        </div>
+
+        <div class="row">
+          <span class="lbl">闲置差分轮播间隔</span>
+          <div>
+            <input type="number" id="idleSprMs" min="1" max="60" step="1" style="width:76px; display:inline-block;"> 秒
+            <span class="val" id="idleSprMsVal">7 秒</span>
+          </div>
+        </div>
+        <div class="hint" id="idleSprMsNote">
+          完全待机时（待机 / 空闲档位、没有台词、没有提醒、没有整点播报、没有互动），
+          桌宠显示「闲置差分」；在「状态配置」卡里给待机 / 空闲状态添加差分，多张按此间隔轮换。
+        </div>
+
+        <div class="row">
+          <span class="lbl">默认差分轮播间隔</span>
+          <div>
+            <input type="number" id="stateCycleMs" min="1" max="60" step="1" style="width:76px; display:inline-block;"> 秒
+            <span class="val" id="stateCycleMsVal">7 秒</span>
+          </div>
+        </div>
+        <div class="hint" id="stateCycleMsNote">
+          「默认轮播」（未在台本里单独配秒数时）每张差分停留的时长。
+          想改默认轮播用哪几张差分：在「状态配置」卡对应状态的台本0 里增删行即可。
+        </div>
+
+        <!-- 闲置差分（0.2.8）相关控件在 buildMap 的每个状态块内；此处为空闲档位（从「外观与行为」移入） -->
+
+        <div class="row">
+          <span class="lbl"></span>
+          <div>
+            <button class="btn primary" id="save">保存</button>
+            <button class="btn" id="reset">恢复默认</button>
+            <span class="status" id="status"></span>
+          </div>
+        </div>
+        <div class="hint">
+          大小同时会调整窗口尺寸，右下角保持不动，范围 0.6×–1.6×。
+          v1（半身）与 v2（全身）用各自的窗口尺寸，切换时会自动适配，桌宠不会被裁切。
+          当前程序版本：<b id="appVer">（读取中…）</b> —— 旧版 exe 不会包含新功能，核对这里可确认跑的是哪个包。
+        </div>
+      </div>
+    </details>
+
+    <!-- ================= 显示指标 ================= -->
+    <details class="card" open>
+      <summary>显示指标（桌宠上那几行提示）</summary>
+      <div class="body">
+        <div class="hint" style="margin-bottom:6px;">
+          关掉某一行，它就会从桌宠身上**整行消失**（与「数值为 0 变淡」不是一回事）。
+        </div>
+
+        <div class="row">
+          <span class="lbl">WorkBuddy 状态检测（总开关）</span>
+          <input type="checkbox" id="detEnabled">
+        </div>
+        <div class="row">
+          <span class="lbl">　├ 待批准 · 弹窗</span>
+          <input type="checkbox" id="detApproval">
+        </div>
+        <div class="row">
+          <span class="lbl">　├ 处理中 · 弹窗</span>
+          <input type="checkbox" id="detWorking">
+        </div>
+        <div class="row">
+          <span class="lbl">　└ 待办 · 弹窗</span>
+          <input type="checkbox" id="detPending">
+        </div>
+        <div class="hint">
+          总开关关闭后三类数值恒为 0：对应胶囊不再弹出，也不会触发对应状态的台词与反应
+          （「全部完成 / 出错」不受影响）。分类开关可单独关掉某一类。
+        </div>
+
+        <div class="row">
+          <span class="lbl">操作 —— 有 N 个操作需要批准</span>
+          <input type="checkbox" id="vApproval">
+        </div>
+        <div class="row">
+          <span class="lbl"></span>
+          <input type="text" id="txtApproval" style="flex:1; min-width:0;" placeholder="有 {n} 个操作需要您批准">
+        </div>
+        <div class="row">
+          <span class="lbl">任务 —— 正在处理 N 个任务中</span>
+          <input type="checkbox" id="vWorking">
+        </div>
+        <div class="row">
+          <span class="lbl"></span>
+          <input type="text" id="txtWorking" style="flex:1; min-width:0;" placeholder="正在处理 {n} 个任务中">
+        </div>
+        <div class="row">
+          <span class="lbl">待办 —— 有 N 个待办</span>
+          <input type="checkbox" id="vAsking">
+        </div>
+        <div class="row">
+          <span class="lbl"></span>
+          <input type="text" id="txtAsking" style="flex:1; min-width:0;" placeholder="有 {n} 个待办">
+        </div>
+        <div class="row" id="rowIdle">
+          <span class="lbl">空闲 —— 已空闲 N 秒</span>
+          <input type="checkbox" id="vIdle">
+        </div>
+        <div class="row" id="rowIdleText">
+          <span class="lbl"></span>
+          <input type="text" id="txtIdle" style="flex:1; min-width:0;" placeholder="已空闲 {n} 秒">
+        </div>
+        <div class="row">
+          <span class="lbl">对话 —— 进行中对话 N</span>
+          <input type="checkbox" id="vConvs">
+        </div>
+        <div class="row">
+          <span class="lbl"></span>
+          <input type="text" id="txtConvs" style="flex:1; min-width:0;" placeholder="进行中对话 {n}">
+        </div>
+        <div class="row">
+          <span class="lbl">今日积分 —— 今日消耗 N（每小时刷新）</span>
+          <input type="checkbox" id="vCredits">
+        </div>
+        <div class="row">
+          <span class="lbl"></span>
+          <input type="text" id="txtCredits" style="flex:1; min-width:0;" placeholder="今日积分 {n}">
+        </div>
+        <div class="row">
+          <span class="lbl">统计范围 —— 仅当前会话 / 全部会话</span>
+          <input type="checkbox" id="vScope">
+        </div>
+        <div class="row">
+          <span class="lbl"></span>
+          <input type="text" id="txtScope" style="flex:1; min-width:0;" placeholder="统计范围：{scope}">
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <span class="lbl">胶囊水平偏移</span>
+          <div>
+            <input type="range" id="pillDx" min="-200" max="200" step="2">
+            <span class="val" id="pillDxVal">0px</span>
+          </div>
+        </div>
+        <div class="row">
+          <span class="lbl">胶囊垂直偏移</span>
+          <div>
+            <input type="range" id="pillDy" min="-200" max="200" step="2">
+            <span class="val" id="pillDyVal">0px</span>
+          </div>
+        </div>
+        <div class="row">
+          <span class="lbl">胶囊整体缩放</span>
+          <div>
+            <input type="range" id="pillSc" min="0.6" max="1.6" step="0.05">
+            <span class="val" id="pillScVal">1.00×</span>
+          </div>
+        </div>
+        <div class="hint">
+          文案自定义可用变量：<code>{n}</code> = 数量（操作数 / 任务数 / 待办数 / 空闲秒数 / 对话数 / 今日积分）；
+          <code>{secs}</code> = 空闲秒数（仅「空闲」行，等同 {n}）；
+          <code>{scope}</code> = 统计范围文本（仅「统计范围」行）。
+          变量处会以高亮数字显示；留空 = 恢复默认文案。
+        </div>
+        <div class="hint">
+          「进行中对话」= 心跳 2 分钟内的交互式会话（已按会话去重、排除临时目录会话）。
+        </div>
+      </div>
+    </details>
+
+    <!-- ================= 气泡 ================= -->
+    <details class="card">
+      <summary>说话气泡（位置与大小）</summary>
+      <div class="body">
+        <div class="row">
+          <span class="lbl">宽度</span>
+          <div><input type="range" id="bubW" min="140" max="360" step="4"><span class="val" id="bubWVal">196px</span></div>
+        </div>
+        <div class="row">
+          <span class="lbl">整体缩放</span>
+          <div><input type="range" id="bubScale" min="0.5" max="2.5" step="0.05"><span class="val" id="bubScaleVal">1.00×</span></div>
+        </div>
+        <div class="row">
+          <span class="lbl">内容字号（相对气泡）</span>
+          <div><input type="range" id="bubF" min="0.5" max="2.5" step="0.05"><span class="val" id="bubFVal">1.00×</span></div>
+        </div>
+        <div class="row">
+          <span class="lbl">名字字号（相对气泡）</span>
+          <div><input type="range" id="bubNmF" min="0.5" max="2.5" step="0.05"><span class="val" id="bubNmFVal">1.00×</span></div>
+        </div>
+        <div class="row">
+          <span class="lbl">水平偏移</span>
+          <div><input type="range" id="bubX" min="-80" max="80" step="2"><span class="val" id="bubXVal">0px</span></div>
+        </div>
+        <div class="row">
+          <span class="lbl">垂直偏移</span>
+          <div><input type="range" id="bubY" min="-40" max="80" step="2"><span class="val" id="bubYVal">0px</span></div>
+        </div>
+        <div class="row">
+          <span class="lbl">对齐方式</span>
+          <div class="seg" id="segBubAlign">
+            <button data-align="left">左对齐</button>
+            <button data-align="center">居中</button>
+            <button data-align="right">右对齐</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:8px;">
+          <span class="lbl">说话者名字</span>
+          <input type="text" id="bubName" style="width:180px;" placeholder="美代">
+        </div>
+        <div class="row">
+          <span class="lbl">名字颜色</span>
+          <input type="color" id="bubNmC">
+        </div>
+        <div class="row">
+          <span class="lbl">名字字体</span>
+          <input type="text" id="bubNmFont" style="width:220px;" placeholder="默认字体（如 Microsoft YaHei）">
+        </div>
+        <div class="row">
+          <span class="lbl">内容颜色</span>
+          <input type="color" id="bubTxC">
+        </div>
+        <div class="row">
+          <span class="lbl">内容字体</span>
+          <input type="text" id="bubTxFont" style="width:220px;" placeholder="默认字体">
+        </div>
+        <div class="row">
+          <span class="lbl">气泡底色</span>
+          <input type="color" id="bubBg">
+        </div>
+        <div class="row">
+          <span class="lbl">底色透明度</span>
+          <div><input type="range" id="bubBgA" min="0.1" max="1" step="0.05"><span class="val" id="bubBgAVal">100%</span></div>
+        </div>
+        <div class="row">
+          <span class="lbl">边框颜色</span>
+          <input type="color" id="bubBc">
+        </div>
+        <div class="hint">
+          「整体缩放」连同字号一起缩放气泡（缩放锚点跟随对齐边）；名字 / 内容字号是**相对气泡**的倍率。
+          颜色只作用于平常气泡；待办 / 待批准的警示配色（黄底）优先。
+          默认值：名字 #4f9c66 · 内容 #1e2430 · 底色 #ffffff · 边框 #e2e7ef（改回这些 = 恢复默认观感）。
+        </div>
+      </div>
+    </details>
+
+    <!-- ================= 表情 · 台词 · 语音 ================= -->
+    <details class="card">
+      <summary>表情 · 台词 · 语音（<span id="mapVer">v2</span>）</summary>
+      <div class="body">
+        <div class="hint" style="margin-bottom:8px;">
+          每个状态的表现<b>只由「台本」驱动</b>：多个台本按<b>权重</b>随机触发，顺序播放
+          「台词 + 差分 + 秒数」，语音在台本开始时播一次；播完歇一阵（外观与行为里默认 60 秒）
+          再按权重重播，直到状态变化。<b>未配置台本的状态</b>用默认差分 + 内置台词。
+          每个状态还可配<b>闲置差分</b>（没在说台词时固定显示的表情）；空闲三档阈值也在此卡调整。
+          右侧图库可点开看大图；改完点<b>保存</b>立即生效（无需重启或切换状态）。
+        </div>
+        <div class="row">
+          <span class="lbl">空闲档位（秒）</span>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input type="number" id="idle5" min="10" max="86400" style="width:76px; display:inline-block;">
+            <span class="hint">/</span>
+            <input type="number" id="idle15" min="10" max="86400" style="width:76px; display:inline-block;">
+            <span class="hint">/</span>
+            <input type="number" id="idle30" min="10" max="86400" style="width:76px; display:inline-block;">
+            <span class="hint">秒（空闲 5–15 / 15–30 / 30 分以上 三档状态的触发阈值，改完保存生效）</span>
+          </div>
+        </div>
+        <div id="mapBox"></div>
+        <div class="hint" id="mapNote" style="margin-top:10px;"></div>
+
+        <!-- 互动反应（单击递进 / 双击 / 长按 / 拖拽 / 悬停） -->
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-top:18px;">
+          <b style="font-size:12.5px; color:var(--ink-2);">互动反应（台词 / 表情 / 语音 / 时长）</b>
+          <button class="btn sm" id="stopPreview" title="立刻结束桌宠上的预览，回到平常状态">回归平常</button>
+        </div>
+        <div class="hint" style="margin:6px 0 8px;">
+          台词支持变量：<b>{processing}</b> 处理中任务数 · <b>{pending}</b> 待办数 · <b>{approval}</b> 待批准数 ·
+          <b>{completed}</b> 已完成数 · <b>{conversations}</b> 进行中对话 · <b>{idle}</b> 空闲秒 ·
+          <b>{mode}</b> 当前状态 · <b>{hour}</b> 整点小时（仅播报） · <b>{night}</b> 是否夜间。
+          语音路径可写相对路径（如 <b>../voices/CH0317_Title.ogg</b>）或绝对路径，只支持 ogg。
+        </div>
+        <div id="reactBox"></div>
+
+        <!-- 变量说明 + 内置台词对照（从桌宠页上报的单一真源读取） -->
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer; font-size:12px; color:var(--ink-3);">内置台词对照表（只读 · 与桌宠页实时一致）</summary>
+          <div id="builtinBox" class="hint" style="margin-top:8px; line-height:1.9;"></div>
+        </details>
+      </div>
+    </details>
+
+    <!-- ================= 整点播报 ================= -->
+    <details class="card">
+      <summary>整点播报（24 小时可分别设置）</summary>
+      <div class="body">
+        <div class="row" style="padding-top:2px;">
+          <span class="lbl">总开关之外，还要逐小时开启</span>
+          <div>
+            <button class="btn sm" id="hourAllOff">全部关闭</button>
+            <button class="btn sm" id="hourCopyAll">复制到所有小时</button>
+            <button class="btn sm" id="hourTest">试播一次</button>
+          </div>
+        </div>
+        <div class="hours" id="hourlyBar"></div>
+        <div class="houredit" id="hourEdit">
+          <div class="row">
+            <span class="lbl" id="hourTitle">选中小时 ——</span>
+            <div>
+              <label class="hint"><input type="checkbox" id="hourOn" style="vertical-align:-3px;"> 该小时播报</label>
+            </div>
+          </div>
+          <div class="row" style="align-items:flex-start;">
+            <span class="lbl" style="padding-top:6px;">播报文本</span>
+            <div id="hourScriptBox" style="flex:1;"></div>
+          </div>
+          <div class="hint" style="margin:2px 0 6px;">
+            到点按权重随机选一个台本、顺序播放各行：每行 = <b>台词 + 差分 + 秒数</b>（台词支持 {hour}），
+            台本语音在开头播一次 —— 原来的「台词 / 关联表情 / 语音文件 / 差分预览 / 时长」全部并入台本，不再有两套配置打架。
+          </div>
+          <div class="row">
+            <span class="lbl"></span>
+            <button class="btn sm" id="hourReset" title="这个小时完全回默认：关闭播报并清空台本">重置此小时</button>
+          </div>
+        </div>
+        <div class="hint">
+          迟到超过 <span id="graceText">10</span> 分钟（比如电脑刚从休眠醒来）只记账、不播报，避免一次刷屏。
+        </div>
+      </div>
+    </details>
+
+    <!-- ================= 待办提醒 ================= -->
+    <details class="card">
+      <summary>待办提醒（到点播提醒台本，单击桌宠确认后结束）</summary>
+      <div class="body">
+        <div class="hint" style="margin-bottom:6px;">
+          到设定时间自动播报「提醒台本」，播完歇 5 秒循环重播，直到<b>单击桌宠</b>确认 ——
+          确认后播「确认台本」，播完提醒结束。台词里可用 <b>{name}</b> 代表提醒名称。
+          频率：<b>仅一次</b> = 触发后自动停用；<b>每天</b> = 每天同一时间；<b>自定义</b> = 勾选星期几。
+        </div>
+        <div id="remindBox"></div>
+        <div class="row">
+          <span class="lbl"></span>
+          <div>
+            <button class="btn primary" id="remindAdd">＋新增提醒</button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- ================= 设置预设 ================= -->
+    <details class="card">
+      <summary>设置预设（整套设置存本地，可换着用）</summary>
+      <div class="body">
+        <div class="hint" style="margin-bottom:8px;">
+          预设保存<b>整套设置</b>（表情映射 / 台词 / 语音 / 反应 / 整点 / 台本 / 气泡 / 显示指标 / 音量 / 空闲阈值）。
+          存放在 <b>%APPDATA%\miyo-pet\presets\</b>。「应用」会覆盖当前全部设置并立即生效。
+        </div>
+        <div class="row">
+          <span class="lbl">预设名</span>
+          <div style="display:flex; gap:6px;">
+            <input type="text" id="presetName" placeholder="给这套设置起个名字" style="flex:1;">
+            <button class="btn sm" id="presetConnect" style="display:none;" title="把预设文件夹连接到 exe 旁的 packs\settings（与桌宠窗口互通）；连接一次后浏览器会记住">📁 连接预设文件夹</button>
+            <button class="btn primary" id="presetSaveBtn">保存当前设置为预设</button>
+            <button class="btn" id="presetOpenBtn" title="打开预设文件夹">打开目录</button>
+          </div>
+        </div>
+        <div id="presetList" style="margin-top:8px;"></div>
+      </div>
+    </details>
+
+    <!-- ================= 最近变化 ================= -->
+    <details class="card">
+      <summary>最近变化 · 状态记录</summary>
+      <div class="body">
+        <div class="hint" style="margin-bottom:8px;">
+          「处理中 / 待办 / 待批准 / 完成 / 对话数」任一数字变化都会记一行，落盘在
+          <code>%APPDATA%\miyo-pet\history\changes-YYYY-MM-DD.jsonl</code>，默认保留 14 天。
+        </div>
+        <div class="row" style="padding-top:0;">
+          <span class="lbl" id="histStats">—</span>
+          <div>
+            <button class="btn" id="histRefresh">刷新</button>
+            <button class="btn" id="histOpen">打开历史文件夹</button>
+          </div>
+        </div>
+        <div class="hist" id="histList"></div>
+      </div>
+    </details>
+
+  </div>
+
+  <!-- ================= 右列 ================= -->
+  <div class="side">
+    <details class="card" open id="galleryCard">
+      <summary>差分图库 · <span id="galCount">0</span> 张</summary>
+      <div class="body">
+        <button class="btn sm" id="galConnect" style="display:none; margin-bottom:6px;" title="选择 exe 旁的 packs 文件夹（授权一次，浏览器会记住）">📁 连接差分文件夹（packs）</button>
+        <div class="hint" id="galDiag" style="margin-bottom:6px;">尚未连接差分文件夹——点击上方按钮选择 exe 旁的 packs 文件夹</div>
+        <div class="pv">
+          <img id="previewImg" alt="预览">
+          <div class="meta">
+            <b id="pvId">—</b>
+            <span id="pvState"></span>
+            <button class="btn sm" id="pvSetFirst" title="把这张排到当前状态的第一位">设为首图</button>
+          </div>
+          <div class="row" id="pvCtl" style="margin-top:6px;">
+            <span class="lbl">缩放</span>
+            <input type="range" id="pvZoom" min="1" max="5" step="0.1" value="1" style="width:90px;">
+            <span class="val" id="pvZoomVal">1.0×</span>
+            <span class="lbl">聚焦X</span>
+            <input type="range" id="pvFx" min="0" max="100" value="50" style="width:70px;">
+            <span class="lbl">聚焦Y</span>
+            <input type="range" id="pvFy" min="0" max="100" value="50" style="width:70px;">
+          </div>
+        </div>
+        <div class="hint" style="margin-top:7px;">
+          当前追加目标：<b id="curState">待机</b>
+        </div>
+        <div class="row">
+          <span class="lbl">浏览系列</span>
+          <select id="gSerSel" class="adder" style="max-width:200px;"></select>
+        </div>
+        <div class="gal" id="gallery"></div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="foot">
+  素材版权归 NEXON Games 及官方所有，仅供个人使用，请勿用于商业目的。
+</div>
+
+<!-- 0.3.2：保存 / 恢复默认 悬浮栏容器。⚠️ 必须在主脚本之前 —— 脚本初始化时
+     就要 getElementById 到它，放脚本后面取到 null，按钮永远移不进来（0.3.3 修）。 -->
+<div class="savebar" id="savebar"></div>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- 两套版本的定义 ---------- */
+  /* defaultMapping 与 electron/main.js defaults() 的 mapping 完全一致（「重置」按钮用） */
+  var DEF = {
+    v1: {
+      label: 'v1 · 半身差分',
+      dir: '../v1/assets/spr/',
+      names: (function () { var a = []; for (var i = 0; i <= 37; i++) a.push(i < 10 ? '0' + i : '' + i); a.push('99', 'Idle_01'); return a; })(),
+      /* 0.3.23：file 读 this.dir（applyWebBase 可重写）—— 原箭头硬编码导致网页端裂图 */
+      file: function (id) { return this.dir + 'CH0317_spr_' + id + '.png'; },
+      modes: [['idle', '待机'], ['approval', '待批准'], ['processing', '处理中'],
+              ['pending', '待办'], ['done', '全部完成'], ['error', '出错'],
+              ['idle_5', '空闲 5–15 分'], ['idle_15', '空闲 15–30 分'], ['idle_30', '空闲 30 分以上']],
+      defaultMapping: { idle: ['00', '01'], processing: ['13'], pending: ['21'],
+                        approval: ['21'], done: ['13'], error: ['06'],
+                        idle_5: ['20'], idle_15: ['18'], idle_30: ['16'] }
+    },
+    v2: {
+      label: 'v2 · 全身立绘',
+      dir: './assets/full/',
+      names: (function () { var a = []; for (var i = 0; i <= 37; i++) a.push(i < 10 ? '0' + i : '' + i); a.push('99', 'Eye_Close_01', 'Idle_01'); return a; })(),
+      /* 0.3.23：file 读 this.dir；缩略图（buildGallery）用 dirFullLow（低清副本） */
+      file: function (id) { return this.dir + id + '.png'; },
+      dirFullLow: './assets/full_low/',
+      fileLow: function (id) { return this.dirFullLow + id + '.png'; },
+      /* 0.3.23：full 原图（预览大图）；WEB_ASSETS 探针命中后由 applyWebBase 重写 */
+      fileFull: function (id) {
+        return (typeof WEB_ASSETS === 'string' && WEB_ASSETS)
+          ? WEB_ASSETS + 'v2/assets/full/' + id + '.png'
+          : './assets/full/' + id + '.png';
+      },
+      modes: [['idle', '待机'], ['approval', '待批准'], ['processing', '处理中'], ['pending', '待办'],
+              ['done', '全部完成'], ['error', '出错'],
+              ['idle_5', '空闲 5–15 分'], ['idle_15', '空闲 15–30 分'], ['idle_30', '空闲 30 分以上']],
+      defaultMapping: { idle: ['Idle_01', '01'], processing: ['36'], pending: ['24'],
+                        approval: ['24', '21'], done: ['13'], error: ['33'],
+                        idle_5: ['20'], idle_15: ['18'], idle_30: ['16'] }
+    }
+  };
+
+  var cfg = null;              // 当前编辑中的配置
+  var editVer = 'v2';          // 正在编辑哪一套映射
+  var curMode = 'idle';        // 图库要追加到哪个状态
+  var selHour = new Date().getHours();
+  var cycle = {};
+
+  var el = {
+    segMode: document.getElementById('segMode'),
+    segScope: document.getElementById('segScope'),
+    segBubAlign: document.getElementById('segBubAlign'),
+    scale: document.getElementById('scale'),
+    scaleVal: document.getElementById('scaleVal'),
+    volume: document.getElementById('volume'),
+    volumeVal: document.getElementById('volumeVal'),
+    restMs: document.getElementById('restMs'),
+    restMsVal: document.getElementById('restMsVal'),
+    idleSprMs: document.getElementById('idleSprMs'),
+    idleSprMsVal: document.getElementById('idleSprMsVal'),
+    stateCycleMs: document.getElementById('stateCycleMs'),
+    stateCycleMsVal: document.getElementById('stateCycleMsVal'),
+    appVer: document.getElementById('appVer'),
+    idle5: document.getElementById('idle5'),
+    idle15: document.getElementById('idle15'),
+    idle30: document.getElementById('idle30'),
+    presetName: document.getElementById('presetName'),
+    presetConnect: document.getElementById('presetConnect'),
+    pvZoom: document.getElementById('pvZoom'), pvZoomVal: document.getElementById('pvZoomVal'),
+    pvFx: document.getElementById('pvFx'), pvFy: document.getElementById('pvFy'),
+    galConnect: document.getElementById('galConnect'),
+    presetSaveBtn: document.getElementById('presetSaveBtn'),
+    presetOpenBtn: document.getElementById('presetOpenBtn'),
+    presetList: document.getElementById('presetList'),
+    top: document.getElementById('top'),
+    scopeNote: document.getElementById('scopeNote'),
+    save: document.getElementById('save'),
+    reset: document.getElementById('reset'),
+    status: document.getElementById('status'),
+
+    vApproval: document.getElementById('vApproval'),
+    vWorking: document.getElementById('vWorking'),
+    vAsking: document.getElementById('vAsking'),
+    vIdle: document.getElementById('vIdle'),
+    vConvs: document.getElementById('vConvs'),
+    vCredits: document.getElementById('vCredits'),
+    txtApproval: document.getElementById('txtApproval'),
+    txtWorking: document.getElementById('txtWorking'),
+    txtAsking: document.getElementById('txtAsking'),
+    txtIdle: document.getElementById('txtIdle'),
+    txtConvs: document.getElementById('txtConvs'),
+    txtCredits: document.getElementById('txtCredits'),
+    txtScope: document.getElementById('txtScope'),
+    vScope: document.getElementById('vScope'),
+    rowIdle: document.getElementById('rowIdle'),
+
+    bubW: document.getElementById('bubW'), bubWVal: document.getElementById('bubWVal'),
+    bubScale: document.getElementById('bubScale'), bubScaleVal: document.getElementById('bubScaleVal'),
+    bubNmF: document.getElementById('bubNmF'), bubNmFVal: document.getElementById('bubNmFVal'),
+    bubName: document.getElementById('bubName'),
+    bubNmC: document.getElementById('bubNmC'), bubNmFont: document.getElementById('bubNmFont'),
+    bubTxC: document.getElementById('bubTxC'), bubTxFont: document.getElementById('bubTxFont'),
+    bubBg: document.getElementById('bubBg'), bubBgA: document.getElementById('bubBgA'),
+    bubBgAVal: document.getElementById('bubBgAVal'), bubBc: document.getElementById('bubBc'),
+    lowMem: document.getElementById('lowMem'),
+    pillDx: document.getElementById('pillDx'), pillDxVal: document.getElementById('pillDxVal'),
+    pillDy: document.getElementById('pillDy'), pillDyVal: document.getElementById('pillDyVal'),
+    pillSc: document.getElementById('pillSc'), pillScVal: document.getElementById('pillScVal'),
+    detEnabled: document.getElementById('detEnabled'),
+    detApproval: document.getElementById('detApproval'),
+    detWorking: document.getElementById('detWorking'),
+    detPending: document.getElementById('detPending'),
+    serSel: document.getElementById('serSel'),
+    savebar: document.getElementById('savebar'),
+    bubF: document.getElementById('bubF'), bubFVal: document.getElementById('bubFVal'),
+    bubX: document.getElementById('bubX'), bubXVal: document.getElementById('bubXVal'),
+    bubY: document.getElementById('bubY'), bubYVal: document.getElementById('bubYVal'),
+
+    mapVer: document.getElementById('mapVer'),
+    mapBox: document.getElementById('mapBox'),
+    mapNote: document.getElementById('mapNote'),
+    reactBox: document.getElementById('reactBox'),
+    builtinBox: document.getElementById('builtinBox'),
+    stopPreview: document.getElementById('stopPreview'),
+
+    hourlyBar: document.getElementById('hourlyBar'),
+    hourTitle: document.getElementById('hourTitle'),
+    hourOn: document.getElementById('hourOn'),
+    hourReset: document.getElementById('hourReset'),
+    hourScriptBox: document.getElementById('hourScriptBox'),
+    remindBox: document.getElementById('remindBox'),
+    remindAdd: document.getElementById('remindAdd'),
+    hourAllOff: document.getElementById('hourAllOff'),
+    hourCopyAll: document.getElementById('hourCopyAll'),
+    hourTest: document.getElementById('hourTest'),
+    graceText: document.getElementById('graceText'),
+
+    gallery: document.getElementById('gallery'),
+    galCount: document.getElementById('galCount'),
+    gSerSel: document.getElementById('gSerSel'),
+    curState: document.getElementById('curState'),
+    previewImg: document.getElementById('previewImg'),
+    pvId: document.getElementById('pvId'),
+    pvState: document.getElementById('pvState'),
+    pvSetFirst: document.getElementById('pvSetFirst'),
+
+    histStats: document.getElementById('histStats'),
+    histList: document.getElementById('histList'),
+    histRefresh: document.getElementById('histRefresh'),
+    histOpen: document.getElementById('histOpen')
+  };
+
+  function setStatus(msg, isErr) {
+    el.status.textContent = msg || '';
+    el.status.className = 'status' + (isErr ? ' err' : '');
+    if (msg) setTimeout(function () { el.status.textContent = ''; }, 2600);
+  }
+
+  /* =======================================================
+     表情映射 / 台词 / 语音
+     ======================================================= */
+  /* 0.3.3：系列包用自己的差分清单（主进程扫包目录写入 cfg.packIds[ver]）；
+     'miyo'（无 packIds）走内置美代清单 —— 图库 / 差分下拉 / 台本差分随学生切换。 */
+  function namesOf() {
+    var p = cfg.packIds && cfg.packIds[editVer];
+    return (p && p.length) ? p : DEF[editVer].names;
+  }
+  function idsOf(mode) {
+    var m = cfg.mapping[editVer] || (cfg.mapping[editVer] = {});
+    if (!m[mode]) m[mode] = [];
+    return m[mode];
+  }
+  function linesOf(mode) {
+    var L = cfg.lines.v2 || (cfg.lines.v2 = {});   /* 0.3.6 台本合并：v1/v2 统一 v2 */
+    if (!L[mode]) L[mode] = [];
+    return L[mode];
+  }
+  function voiceOf(mode) {
+    var V = cfg.voices.v2 || (cfg.voices.v2 = {});   /* 0.3.6 台本合并 */
+    if (!V[mode]) V[mode] = [];
+    return V[mode];
+  }
+  function buildMap() {
+    el.mapVer.textContent = DEF[editVer].label;
+    el.mapBox.innerHTML = '';
+
+    DEF[editVer].modes.forEach(function (pair) {
+      var mode = pair[0], label = pair[1];
+
+      var item = document.createElement('div');
+      item.className = 'mapitem';
+
+      /* --- 头：状态名 + chips + ＋ --- */
+      var head = document.createElement('div');
+      head.className = 'maphead';
+      var lbl = document.createElement('div');
+      lbl.className = 'lbl';
+      lbl.textContent = label;
+      head.appendChild(lbl);
+
+      /* --- 0.2.6：上半部分的直接配置（差分映射 / 台词 / 语音）已移除，
+             每个状态的表现只由下方「台本」驱动（未配台本的状态回落默认差分 + 内置台词） --- */
+      var testBtn = document.createElement('button');
+      testBtn.className = 'btn sm';
+      testBtn.textContent = '测试';
+      testBtn.title = '保存配置后在桌宠上预览这个状态（配置了台本 → 播整个台本）';
+      testBtn.addEventListener('click', function () {
+        if (!(window.petHost && typeof window.petHost.testExpr === 'function')) {
+          setStatus('非宿主环境，无法预览', true);
+          return;
+        }
+        var payload = { ms: 3500 };
+        /* 有台本 → 推按权重随机选出的整个台本（能测出差分切换与秒数节奏） */
+        var sl = (cfg.scripts && cfg.scripts.v2 && cfg.scripts.v2[mode]) || [];
+        if (sl.length) {
+          var total = 0;
+          sl.forEach(function (s) { total += Math.max(0, (s.weight == null ? 1 : s.weight)); });
+          /* 权重随机（0.2.7：含台本0；全 0 权重回第一个） */
+          var chosen = sl[0];
+          if (total > 0) {
+            var rr = Math.random() * total;
+            for (var j = 0; j < sl.length; j++) {
+              rr -= Math.max(0, (sl[j].weight == null ? 1 : sl[j].weight));
+              if (rr < 0) { chosen = sl[j]; break; }
+            }
+          }
+          payload.script = {
+            voice: chosen.voice || null,
+            lines: (chosen.lines || []).map(function (l) {
+              return { text: l.text, spr: l.spr || null, sec: l.sec || 3 };
+            })
+          };
+        } else {
+          /* 未配置任何台本 → 预览台本0（默认轮播的具体化） */
+          payload.script = JSON.parse(JSON.stringify(defaultScriptSeed(mode)));
+        }
+        window.petHost.saveConfig(cfg).then(function () {
+          window.petHost.testExpr(payload);
+          setStatus('已发送测试预览（请看桌宠；点「回归平常」结束）');
+        }).catch(function (e) { setStatus('测试失败：' + e.message, true); });
+      });
+
+      var resetBtn = document.createElement('button');
+      resetBtn.className = 'btn sm';
+      resetBtn.textContent = '重置';
+      resetBtn.title = '这个状态完全回内置：台本清空，差分映射恢复默认';
+      resetBtn.addEventListener('click', function () {
+        var dm = DEF[editVer].defaultMapping && DEF[editVer].defaultMapping[mode];
+        if (dm) cfg.mapping[editVer][mode] = dm.slice();
+        linesOf(mode).length = 0;
+        voiceOf(mode).length = 0;
+        if (cfg.scripts && cfg.scripts.v2) cfg.scripts.v2[mode] = [];
+        setStatus('已重置为内置（含台本，保存后生效）');
+      });
+
+      head.appendChild(testBtn);
+      head.appendChild(resetBtn);
+      item.appendChild(head);
+
+      /* --- 闲置差分（0.2.12）：只给闲置族状态（待机/空闲档位）配，完全待机时轮播 --- */
+      if (IDLE_MODES.indexOf(mode) >= 0) {
+        appendIdleSprRow(mode, item);
+        appendIdleFxRow(mode, item);
+      }
+
+      /* --- 台本编辑（0.2.6 起：该状态唯一的表现配置） --- */
+      appendScriptEditor(mode, item);
+
+      el.mapBox.appendChild(item);
+    });
+
+    buildReacts();
+  }
+
+  /* renderMap / chips / mapthumbs 已随「状态直接配置」一起移除（0.2.6）：
+     每个状态的表现只由台本驱动；el.curState 在下方 sync 时单独回填。 */
+
+  function stateLabel(mode) {
+    var found = '待机';
+    DEF[editVer].modes.forEach(function (p) { if (p[0] === mode) found = p[1]; });
+    return found;
+  }
+
+  /* =======================================================
+     互动反应台本化（0.2.7）：每个动作一组台本（与状态台本同构），按权重随机；
+     未配置的动作用内置表现（对照与默认台本见下方「内置对照」）。
+     ======================================================= */
+  var REACT_KINDS = [
+    { kind: 'click1', label: '单击 1 次', note: '连续点击按次数递进，各档台本独立配置' },
+    { kind: 'click2', label: '单击 2 次', note: '' },
+    { kind: 'click3', label: '单击 3 次', note: '' },
+    { kind: 'click4', label: '单击 4 次', note: '' },
+    { kind: 'click5', label: '单击 5 次', note: '' },
+    { kind: 'click6', label: '单击 6 次', note: '' },
+    { kind: 'click7', label: '单击 7 次', note: '' },
+    { kind: 'click8', label: '单击 8 次', note: '第 8 次及以后都算这一档' },
+    { kind: 'dblclick',  label: '双击',        note: '' },
+    { kind: 'longpress', label: '长按 0.7 秒', note: '' },
+    { kind: 'dragstart', label: '拖起',        note: '' },
+    { kind: 'drop',      label: '放下',        note: '' },
+    { kind: 'hover',     label: '悬停 1.6 秒', note: '' }
+  ];
+  var BUILTINS = null;            // 桌宠页上报的内置台词/默认台本（单一真源）
+  var previewAudio = null;        // 设置页本地的试听播放器（单例，换曲即停上句）
+
+  function reactsRoot(kind) {
+    if (!cfg.reacts) cfg.reacts = { v1: {}, v2: {} };
+    if (!cfg.reacts.v2) cfg.reacts.v2 = {};   /* 0.3.6 台本合并 */
+    if (!Array.isArray(cfg.reacts.v2[kind])) cfg.reacts.v2[kind] = [];
+    return cfg.reacts.v2[kind];
+  }
+
+  /* 互动台本规格统一（0.2.17）：把旧格式（{sprs, lines:[台词串], ms}）或残缺项
+     就地迁移成台本结构 {voice, weight, lines:[{text,spr,sec}]} —— 否则旧配置渲染成
+     「0 行」的台本，添加一行时 sc.lines.push 直接抛异常（= 不可填入台词的根因）。 */
+  function normalizeReactList(list) {
+    for (var i = list.length - 1; i >= 0; i--) {
+      var x = list[i];
+      if (!x || typeof x !== 'object' || Array.isArray(x)) { list.splice(i, 1); continue; }
+      /* 新格式判定：lines 是数组且每项都是对象；旧格式（0.2.6）的 lines 是
+         字符串数组（台词列表），必须走迁移（否则渲染成 0 行台本，
+         添加一行时 sc.lines.push 抛异常 = 「不可填入台词」的根因） */
+      var looksNew = Array.isArray(x.lines) &&
+        x.lines.every(function (l) { return l && typeof l === 'object'; });
+      if (!looksNew) {
+        var sprs = Array.isArray(x.sprs) ? x.sprs : [];
+        var texts = Array.isArray(x.lines) ? x.lines : [];
+        var ms = parseInt(x.ms, 10);
+        var sec = Math.max(1, Math.round((isFinite(ms) && ms > 0 ? ms : 2000) / 1000 / Math.max(1, sprs.length)));
+        var voice = (Array.isArray(x.voice) && x.voice.length) ? String(x.voice[0]) : (typeof x.voice === 'string' ? x.voice : '');
+        var lines = sprs.map(function (spr, j) {
+          return { text: (typeof texts[j] === 'string' ? texts[j] : ''), spr: String(spr || ''), sec: sec };
+        });
+        if (!lines.length) { list.splice(i, 1); continue; }
+        list[i] = { voice: voice, weight: 1, lines: lines };
+        continue;
+      }
+      /* 新格式：补齐行结构与缺省字段 */
+      x.voice = typeof x.voice === 'string' ? x.voice
+              : (Array.isArray(x.voice) && x.voice.length) ? String(x.voice[0]) : '';
+      if (typeof x.weight !== 'number' || !isFinite(x.weight)) x.weight = 1;
+      x.lines = x.lines.map(function (l) {
+        if (!l || typeof l !== 'object') return { text: '', spr: '', sec: 3 };
+        return { text: typeof l.text === 'string' ? l.text : '',
+                 spr: typeof l.spr === 'string' ? l.spr : '',
+                 sec: (parseInt(l.sec, 10) > 0) ? parseInt(l.sec, 10) : 3 };
+      });
+    }
+    return list;
+  }
+
+  /* 语音路径 → 可播放 URL：绝对路径转 file:///，相对路径按设置页位置解析 */
+  function voiceUrl(p) {
+    p = String(p || '').trim();
+    if (!p) return '';
+    if (/^file:/i.test(p)) return encodeURI(p);
+    if (/^[a-zA-Z]:[\\/]/.test(p)) return 'file:///' + encodeURI(p.replace(/\\/g, '/'));
+    /* 0.3.13：纯文件名 → voice 文件夹映射（packs/voice 优先，免后缀，仅 ogg） */
+    if (!/[\\/]/.test(p)) {
+      const vm = cfg.voiceMap;
+      if (vm) {
+        if (vm[p]) return vm[p];
+        if (vm[p + '.ogg']) return vm[p + '.ogg'];
+        const base = p.replace(/\.ogg$/i, '');
+        if (vm[base]) return vm[base];
+      }
+      const vr = cfg.voiceRootUrl;
+      if (vr) return vr + encodeURI(p);
+      /* 0.3.18 网页端：探测到的 voice 基址（导出副本旁 packs/voice 或同级 voice） */
+      if (WEB_VOICE) return WEB_VOICE + encodeURI(p);
+    }
+    try { return new URL(p, location.href).href; } catch (e) { return p; }
+  }
+  function playPreviewAudio(file) {
+    var u = voiceUrl(file);
+    if (!u) { setStatus('未填写语音路径', true); return; }
+    try {
+      if (previewAudio) { previewAudio.pause(); previewAudio.currentTime = 0; }
+      previewAudio = new Audio(u);
+      previewAudio.play().then(function () { setStatus('试听中：' + file); })
+        .catch(function (e) {
+          setStatus('试听失败：voice 文件夹中找不到「' + file + '」（.ogg）——'
+            + '请确认文件在 exe 旁 packs/voice/ 内，文件名不含后缀也应可识别', true);
+        });
+    } catch (e) { setStatus('播放失败：' + e.message, true); }
+  }
+
+  function buildReacts() {
+    if (!el.reactBox) return;
+    el.reactBox.innerHTML = '';
+
+    REACT_KINDS.forEach(function (rk) {
+      var list = normalizeReactList(reactsRoot(rk.kind));
+      var wrap = document.createElement('div');
+      wrap.className = 'mapitem';
+
+      var head = document.createElement('div');
+      head.className = 'maphead';
+      var lbl = document.createElement('div');
+      lbl.className = 'lbl';
+      lbl.textContent = rk.label + (rk.note ? '（' + rk.note + '）' : '');
+      head.appendChild(lbl);
+
+      var col2 = document.createElement('div');
+      col2.style.display = 'flex';
+      col2.style.flexDirection = 'column';
+      col2.style.gap = '5px';
+
+      var testBtn = document.createElement('button');
+      testBtn.className = 'btn sm';
+      testBtn.textContent = '测试';
+      testBtn.title = '保存配置后在桌宠上按权重随机预览一个台本（未配置时预览内置）';
+      testBtn.addEventListener('click', function () {
+        if (!(window.petHost && typeof window.petHost.testExpr === 'function')) {
+          setStatus('非宿主环境，无法预览', true);
+          return;
+        }
+        var chosen = null;
+        if (list.length) {
+          var total = 0;
+          list.forEach(function (s) { total += Math.max(0, (s.weight == null ? 1 : s.weight)); });
+          if (total > 0) {
+            var r = Math.random() * total;
+            chosen = list[list.length - 1];
+            for (var i = 0; i < list.length; i++) {
+              r -= Math.max(0, (list[i].weight == null ? 1 : list[i].weight));
+              if (r < 0) { chosen = list[i]; break; }
+            }
+          } else chosen = list[0];
+        } else {
+          var b = (BUILTINS && BUILTINS.reactScripts && BUILTINS.reactScripts[rk.kind]) || [];
+          chosen = b.length ? b[Math.floor(Math.random() * b.length)] : null;
+        }
+        if (!chosen) { setStatus('该动作没有可用台本', true); return; }
+        window.petHost.saveConfig(cfg).then(function () {
+          window.petHost.testExpr({ script: JSON.parse(JSON.stringify(chosen)) });
+          setStatus('已发送测试预览（请看桌宠；点「回归平常」结束）');
+        }).catch(function (e) { setStatus('测试失败：' + e.message, true); });
+      });
+      col2.appendChild(testBtn);
+
+      var resetBtn = document.createElement('button');
+      resetBtn.className = 'btn sm';
+      resetBtn.textContent = '重置';
+      resetBtn.title = '清空这个动作的全部台本，完全回到内置表现';
+      resetBtn.addEventListener('click', function () {
+        if (cfg.reacts && cfg.reacts.v2) delete cfg.reacts.v2[rk.kind];
+        buildReacts();
+        setStatus('已重置为内置（保存后生效）');
+      });
+      col2.appendChild(resetBtn);
+      head.appendChild(col2);
+      wrap.appendChild(head);
+
+      appendScriptListEditor(list, wrap, {
+        label: rk.label + '（' + DEF[editVer].label + '）',
+        defMode: false,
+        tip: '触发该动作时按权重随机选一个台本，从第一行顺序播放；台词留空 = 只换差分不出台词；未配置任何台本时用内置表现。单击 1–8 次各自独立；旧版「单击」配置仍作为所有档位的兜底（此处不再显示）。',
+        rebuildFn: function () { buildReacts(); }
+      });
+      el.reactBox.appendChild(wrap);
+    });
+    renderBuiltins();
+  }
+
+  /* 内置台词对照（单一真源 = 桌宠页上报） */
+  function renderBuiltins() {
+    if (!el.builtinBox) return;
+    if (!BUILTINS) {
+      el.builtinBox.textContent = '（等待桌宠页上报内置台词……若一直为空，请先启动桌宠主窗口）';
+      return;
+    }
+    var html = '<b>状态台词（' + DEF[editVer].label + '）</b><br>';
+    DEF[editVer].modes.forEach(function (pair) {
+      var t = (BUILTINS.states && BUILTINS.states[editVer] && BUILTINS.states[editVer][pair[0]]) || '（无）';
+      html += '· ' + pair[1] + '：' + escapeHtml(t) + '<br>';
+    });
+    html += '<br><b>互动反应</b><br>';
+    Object.keys(BUILTINS.reacts || {}).forEach(function (k) {
+      var v = BUILTINS.reacts[k];
+      var label = k;
+      REACT_KINDS.forEach(function (rk) { if (rk.kind === k) label = rk.label; });
+      if (Array.isArray(v)) {
+        html += '· ' + label + '：';
+        v.forEach(function (line, i) { html += '<br>&nbsp;&nbsp;' + (i + 1) + ' 级：' + escapeHtml(line); });
+        html += '<br>';
+      } else {
+        html += '· ' + label + '：' + escapeHtml(String(v)) + '<br>';
+      }
+    });
+    el.builtinBox.innerHTML = html;
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* 「回归平常」：立刻结束桌宠上的预览 */
+  if (el.stopPreview) {
+    el.stopPreview.addEventListener('click', function () {
+      if (window.petHost && typeof window.petHost.testExpr === 'function') {
+        window.petHost.testExpr({ stop: true });
+        setStatus('已结束预览，桌宠回归平常');
+      } else setStatus('非宿主环境', true);
+    });
+  }
+
+  /* =======================================================
+     台本（0.2.4）：每状态多个台本按权重触发；台本内每行 = 台词+差分+秒数
+     ======================================================= */
+  function scriptsRoot(mode) {
+    if (!cfg.scripts) cfg.scripts = { v1: {}, v2: {} };
+    if (!cfg.scripts.v2) cfg.scripts.v2 = {};   /* 0.3.6 台本合并 */
+    if (!cfg.scripts.v2[mode]) cfg.scripts.v2[mode] = [];
+    return cfg.scripts.v2[mode];
+  }
+  function newScript() {
+    return { voice: '', weight: 1, lines: [{ text: '', spr: '', sec: 3 }] };
+  }
+
+  /* 台本0 的默认内容：默认（或自定义后）的差分映射 → 每张一行、空台词、7 秒一换 */
+  function defaultScriptSeed(mode) {
+    var m = (cfg.mapping && cfg.mapping[editVer] && cfg.mapping[editVer][mode]) ||
+            (DEF[editVer].defaultMapping && DEF[editVer].defaultMapping[mode]) || [];
+    return { def: 1, weight: 1, voice: '',
+      lines: m.map(function (spr) { return { text: '', spr: spr, sec: 7 }; }) };
+  }
+
+  /* =======================================================
+     闲置差分（0.2.12 重写）：只对闲置族状态（待机/空闲档位）生效。
+     完全待机（无台词、无提醒、无播报、无互动）时桌宠显示这组差分，
+     多张按「闲置差分轮播间隔」轮换；未配置 = 按默认差分轮播（台本0）。
+     ======================================================= */
+  var IDLE_MODES = ['idle', 'idle_5', 'idle_15', 'idle_30'];
+  function idleSprsRoot() {
+    if (!cfg.idleSprs) cfg.idleSprs = { v1: {}, v2: {} };
+    if (!cfg.idleSprs[editVer]) cfg.idleSprs[editVer] = {};
+    return cfg.idleSprs[editVer];
+  }
+  function appendIdleSprRow(mode, host) {
+    var R = idleSprsRoot();
+    if (!Array.isArray(R[mode])) R[mode] = [];
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin:6px 0 0 8px;flex-wrap:wrap;';
+
+    var lbl = document.createElement('span');
+    lbl.className = 'hint';
+    lbl.style.cssText = 'white-space:nowrap;padding-top:6px;';
+    lbl.textContent = '闲置差分';
+    lbl.title = '只在「完全待机」时显示：平常待机/空闲档位、没有台词、没有提醒、没有整点播报、没有互动。' +
+      '可加多张，按「外观与行为 → 闲置差分轮播间隔」轮换；清空 = 恢复默认差分轮播。' +
+      '空闲档位（5/15/30 分）没配时自动沿用「待机」的配置';
+    row.appendChild(lbl);
+
+    var chips = document.createElement('div');
+    chips.style.cssText = 'display:flex;gap:4px;align-items:center;flex-wrap:wrap;';
+    row.appendChild(chips);
+
+    function paint() {
+      chips.innerHTML = '';
+      if (!R[mode].length) {
+        var none = document.createElement('span');
+        none.className = 'hint';
+        none.textContent = '（未配置 = 默认轮播）';
+        chips.appendChild(none);
+        return;
+      }
+      R[mode].forEach(function (id, i) {
+        var box = document.createElement('span');
+        box.style.cssText = 'display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:6px;padding:2px;';
+        var im = document.createElement('img');
+        im.style.cssText = 'width:36px;height:36px;object-fit:contain;background:#fff;border-radius:4px;';
+        if (editVer === 'v1') im.style.objectFit = 'cover';
+        im.src = galFile(id);
+        im.title = id + '（缺号自动回退 00）';
+        im.addEventListener('error', function () {
+          if (im.dataset.fb) return;
+          im.dataset.fb = '1';
+          im.src = galFile('00');
+        });
+        box.appendChild(im);
+        var x = document.createElement('button');
+        x.className = 'btn sm';
+        x.textContent = '×';
+        x.title = '移除这张闲置差分';
+        x.addEventListener('click', function () { R[mode].splice(i, 1); paint(); });
+        box.appendChild(x);
+        chips.appendChild(box);
+      });
+    }
+    paint();
+
+    /* 0.3.17：合并为单框（台本行同款 input+datalist 形态）——
+       ⚠️ list 是只读 IDL 属性，严禁 `.list =` 赋值（严格模式抛 TypeError，
+       0.3.11/0.3.13/0.3.15 三次模块全灭的根因），必须 setAttribute */
+    var sprInp = document.createElement('input');
+    sprInp.type = 'text';
+    sprInp.setAttribute('list', 'diffIds');
+    sprInp.className = 'adder';
+    sprInp.style.width = '92px';
+    sprInp.title = '选择或输入差分编号（选中/输入即添加，可连续添加多张；缺失编号运行时回退 00）';
+    sprInp.placeholder = '差分…';
+    sprInp.addEventListener('change', function () {
+      const v = sprInp.value.trim();
+      if (v && R[mode].indexOf(v) < 0) R[mode].push(v);
+      sprInp.value = '';
+      paint();
+    });
+    row.appendChild(sprInp);
+    host.appendChild(row);
+  }
+
+  /* =======================================================
+     闲置状态特效（0.2.16）：眨眼动画 + 立绘摇晃。
+     仅闲置族状态、且「完全待机」时生效；随闲置差分编辑行一起出现在状态块里。
+     ======================================================= */
+  function idleBlinkRoot() {
+    if (!cfg.idleBlink) cfg.idleBlink = { v1: {}, v2: {} };
+    if (!cfg.idleBlink[editVer]) cfg.idleBlink[editVer] = {};
+    return cfg.idleBlink[editVer];
+  }
+  function idleSwayRoot() {
+    if (!cfg.idleSway) cfg.idleSway = { v1: {}, v2: {} };
+    if (!cfg.idleSway[editVer]) cfg.idleSway[editVer] = {};
+    return cfg.idleSway[editVer];
+  }
+  function idleBreatheRoot() {
+    if (!cfg.idleBreathe) cfg.idleBreathe = { v1: {}, v2: {} };
+    if (!cfg.idleBreathe[editVer]) cfg.idleBreathe[editVer] = {};
+    return cfg.idleBreathe[editVer];
+  }
+  function appendIdleFxRow(mode, host) {
+    var B = idleBlinkRoot();
+    if (!B[mode] || typeof B[mode] !== 'object') B[mode] = { on: mode === 'idle', spr: '99', ms: 4200 };
+    var S = idleSwayRoot();
+    if (!S[mode] || typeof S[mode] !== 'object') S[mode] = { on: false, dir: 'x', amp: 3, ms: 3000 };
+
+    /* --- 眨眼行 --- */
+    var rowB = document.createElement('div');
+    rowB.style.cssText = 'display:flex;gap:6px;align-items:center;margin:4px 0 0 8px;flex-wrap:wrap;';
+    var lblB = document.createElement('span');
+    lblB.className = 'hint';
+    lblB.textContent = '眨眼动画';
+    lblB.title = '完全待机时自动眨眼：可自定义眨眼用的差分与间隔。默认「待机」开启（找回默认轮播期消失的眨眼）';
+    rowB.appendChild(lblB);
+    var chkB = document.createElement('input');
+    chkB.type = 'checkbox'; chkB.checked = B[mode].on === true;
+    chkB.addEventListener('change', function () { B[mode].on = chkB.checked; });
+    rowB.appendChild(chkB);
+    var selB = document.createElement('select');
+    selB.className = 'adder'; selB.title = '眨眼用的差分（覆盖在当前差分上，如 99 闭眼）';
+    namesOf().forEach(function (id) {
+      var o = document.createElement('option');
+      o.value = id; o.textContent = id;
+      if (id === B[mode].spr) o.selected = true;
+      selB.appendChild(o);
+    });
+    selB.addEventListener('change', function () { if (selB.value) B[mode].spr = selB.value; });
+    rowB.appendChild(selB);
+    var inB = document.createElement('input');
+    inB.type = 'number'; inB.min = '1'; inB.max = '30'; inB.step = '1';
+    inB.style.cssText = 'width:60px; display:inline-block;';
+    inB.value = String(Math.round((B[mode].ms || 4200) / 1000));
+    inB.title = '眨眼间隔（秒）';
+    inB.addEventListener('input', function () {
+      var sec = Math.max(1, Math.min(30, parseInt(inB.value, 10) || 4));
+      B[mode].ms = sec * 1000;
+    });
+    rowB.appendChild(inB);
+    var uB = document.createElement('span');
+    uB.className = 'hint'; uB.textContent = '秒/次';
+    rowB.appendChild(uB);
+    host.appendChild(rowB);
+
+    /* --- 摇晃行 --- */
+    var rowS = document.createElement('div');
+    rowS.style.cssText = 'display:flex;gap:6px;align-items:center;margin:4px 0 0 8px;flex-wrap:wrap;';
+    var lblS = document.createElement('span');
+    lblS.className = 'hint';
+    lblS.textContent = '立绘摇晃';
+    lblS.title = '完全待机时立绘轻轻晃动：方向（左右/上下）、幅度（1–10px）、周期均可调。开启后覆盖该档位原有的生气小动作';
+    rowS.appendChild(lblS);
+    var chkS = document.createElement('input');
+    chkS.type = 'checkbox'; chkS.checked = S[mode].on === true;
+    chkS.addEventListener('change', function () { S[mode].on = chkS.checked; });
+    rowS.appendChild(chkS);
+    var selS = document.createElement('select');
+    selS.className = 'adder'; selS.title = '摇晃方向';
+    [['x', '左右'], ['y', '上下']].forEach(function (p) {
+      var o = document.createElement('option');
+      o.value = p[0]; o.textContent = p[1];
+      if (p[0] === S[mode].dir) o.selected = true;
+      selS.appendChild(o);
+    });
+    selS.addEventListener('change', function () { if (selS.value) S[mode].dir = selS.value; });
+    rowS.appendChild(selS);
+    var inAmp = document.createElement('input');
+    inAmp.type = 'number'; inAmp.min = '1'; inAmp.max = '10'; inAmp.step = '0.5';
+    inAmp.style.cssText = 'width:56px; display:inline-block;';
+    inAmp.value = String(S[mode].amp);
+    inAmp.title = '晃动幅度（px，1–10）';
+    inAmp.addEventListener('input', function () {
+      var v = Math.max(1, Math.min(10, parseFloat(inAmp.value) || 3));
+      S[mode].amp = v;
+    });
+    rowS.appendChild(inAmp);
+    var uA = document.createElement('span');
+    uA.className = 'hint'; uA.textContent = 'px';
+    rowS.appendChild(uA);
+    var inMs = document.createElement('input');
+    inMs.type = 'number'; inMs.min = '1'; inMs.max = '10'; inMs.step = '0.5';
+    inMs.style.cssText = 'width:56px; display:inline-block;';
+    inMs.value = String(Math.round((S[mode].ms || 3000) / 1000));
+    inMs.title = '晃动周期（秒，一个来回的时长）';
+    inMs.addEventListener('input', function () {
+      var sec = Math.max(1, Math.min(10, parseFloat(inMs.value) || 3));
+      S[mode].ms = Math.round(sec * 1000);
+    });
+    rowS.appendChild(inMs);
+    var uS = document.createElement('span');
+    uS.className = 'hint'; uS.textContent = '秒/来回';
+    rowS.appendChild(uS);
+    host.appendChild(rowS);
+
+    /* --- 呼吸行（0.2.17）：轻微缩放，origin 在底部（向上起伏），与摇晃可同开 --- */
+    var BR = idleBreatheRoot();
+    if (!BR[mode] || typeof BR[mode] !== 'object') BR[mode] = { on: false, amp: 0.015, ms: 3200 };
+    var rowBr = document.createElement('div');
+    rowBr.style.cssText = 'display:flex;gap:6px;align-items:center;margin:4px 0 0 8px;flex-wrap:wrap;';
+    var lblBr = document.createElement('span');
+    lblBr.className = 'hint';
+    lblBr.textContent = '呼吸起伏';
+    lblBr.title = '完全待机时立绘轻微缩放起伏（胸腔呼吸感）：幅度为缩放峰值（1.5% ≈ 自然呼吸），周期为一个呼吸循环';
+    rowBr.appendChild(lblBr);
+    var chkBr = document.createElement('input');
+    chkBr.type = 'checkbox'; chkBr.checked = BR[mode].on === true;
+    chkBr.addEventListener('change', function () { BR[mode].on = chkBr.checked; });
+    rowBr.appendChild(chkBr);
+    var inBamp = document.createElement('input');
+    inBamp.type = 'number'; inBamp.min = '0.5'; inBamp.max = '3'; inBamp.step = '0.5';
+    inBamp.style.cssText = 'width:64px; display:inline-block;';
+    inBamp.value = String(Math.round((BR[mode].amp || 0.015) * 1000) / 10);
+    inBamp.title = '呼吸幅度（缩放峰值 %，0.5–3，1.5 最自然）';
+    inBamp.addEventListener('input', function () {
+      var v = Math.max(0.5, Math.min(3, parseFloat(inBamp.value) || 1.5));
+      BR[mode].amp = Math.round(v * 10) / 1000;
+    });
+    rowBr.appendChild(inBamp);
+    var uBamp = document.createElement('span');
+    uBamp.className = 'hint'; uBamp.textContent = '%';
+    rowBr.appendChild(uBamp);
+    var inBms = document.createElement('input');
+    inBms.type = 'number'; inBms.min = '2'; inBms.max = '8'; inBms.step = '0.5';
+    inBms.style.cssText = 'width:56px; display:inline-block;';
+    inBms.value = String(Math.round((BR[mode].ms || 3200) / 1000));
+    inBms.title = '呼吸周期（秒，一个完整呼吸循环）';
+    inBms.addEventListener('input', function () {
+      var sec = Math.max(2, Math.min(8, parseFloat(inBms.value) || 3.2));
+      BR[mode].ms = Math.round(sec * 1000);
+    });
+    rowBr.appendChild(inBms);
+    var uBms = document.createElement('span');
+    uBms.className = 'hint'; uBms.textContent = '秒/呼吸';
+    rowBr.appendChild(uBms);
+    host.appendChild(rowBr);
+  }
+
+  /* 每状态的台本编辑器（0.2.7：台本0 = 默认台本，可改不可删） */
+  function appendScriptEditor(mode, host) {
+    appendScriptListEditor(scriptsRoot(mode), host, {
+      label: stateLabel(mode) + '（' + DEF[editVer].label + '）',
+      defMode: true,
+      defSeed: defaultScriptSeed(mode),
+      tip: '台本按版本（v1/v2）分别保存；当前版本没配的状态会自动借用另一版本的配置。台本0 是默认台本（原「默认轮播」的具体化），可修改但不可删除；未修改时按默认差分轮播。触发时按权重随机选台本，从第一行顺序播放：每行显示「该行差分 + 台词」sec 秒后自动切下一行；台词留空 = 只换差分不出台词（不回落内置台词）；语音在台本开始时播一次；播完歇（外观与行为里可调）再按权重重播。'
+    });
+  }
+
+  /* 通用台本列表编辑器（0.2.7）：状态台本（含台本0）与互动反应台本共用。
+     opts: { label, defMode, defSeed, tip, rebuildFn } */
+  function appendScriptListEditor(list, host, opts) {
+    opts = opts || {};
+    var defSc = null, defVirt = false;
+    if (opts.defMode) {
+      for (var di = 0; di < list.length; di++) {
+        if (list[di] && list[di].def) { defSc = list[di]; break; }
+      }
+      if (!defSc) {
+        defSc = JSON.parse(JSON.stringify(opts.defSeed || { def: 1, weight: 1, voice: '', lines: [] }));
+        defVirt = true;                         // 未落盘：首次编辑才写入列表
+      }
+    }
+    /* 台本0 首次编辑即落盘：捕获阶段监听，先于任何控件 handler 执行
+       （input = 文本/数字；change = 差分下拉；click = 按钮。三者缺一会漏落盘） */
+    function ensureDef() {
+      if (opts.defMode && list.indexOf(defSc) < 0) list.unshift(defSc);
+    }
+    function rebuild() {
+      var open = det.hasAttribute('open');
+      if (opts.rebuildFn) { opts.rebuildFn(); return; }
+      appendScriptListEditor(list, host, opts);
+      var fresh = host.lastChild;
+      host.removeChild(det);
+      if (open) fresh.setAttribute('open', '');
+    }
+
+    var det = document.createElement('details');
+    det.style.margin = '6px 0 0 8px';
+    /* 台本0 首次编辑即落盘：捕获阶段监听，先于任何控件 handler 执行
+       （input = 文本/数字；change = 差分下拉；click = 按钮。三者缺一会漏落盘） */
+    det.addEventListener('input', ensureDef, true);
+    det.addEventListener('change', ensureDef, true);
+    det.addEventListener('click', ensureDef, true);
+
+    var sum = document.createElement('summary');
+    sum.style.cursor = 'pointer';
+    sum.style.fontSize = '12px';
+    sum.style.color = 'var(--ink-2)';
+    det.appendChild(sum);
+    function paintSum() {
+      var total = 0, n = 0;
+      list.forEach(function (s) { total += (s.lines || []).length; if (!(opts.defMode && s && s.def)) n++; });
+      if (opts.defMode) n++;
+      sum.textContent = opts.label + '台本（' + n + ' 个' + (opts.defMode ? '，含台本0' : '') +
+        ' · 共 ' + total + ' 行 · 按权重随机触发，顺序播放）';
+    }
+    paintSum();
+
+    var body = document.createElement('div');
+    body.style.paddingTop = '4px';
+    var tip = document.createElement('div');
+    tip.className = 'hint';
+    tip.style.margin = '2px 0 6px';
+    tip.textContent = opts.tip || '触发时按权重随机选一个台本，从第一行顺序播放。';
+    body.appendChild(tip);
+
+    var addBar = document.createElement('div');
+    addBar.style.marginBottom = '6px';
+    var addBtn = document.createElement('button');
+    addBtn.className = 'btn sm';
+    addBtn.textContent = '＋新增台本';
+    addBtn.title = '新增一个台本：触发时按权重随机选中，顺序播放各行';
+    addBtn.addEventListener('click', function () {
+      list.push(newScript());
+      rebuild();
+    });
+    addBar.appendChild(addBtn);
+    body.appendChild(addBar);
+
+    /* 渲染顺序：台本0 在前，用户台本在后 */
+    var order = [];
+    if (opts.defMode) order.push({ sc: defSc, isDef: true, virt: defVirt });
+    list.forEach(function (sc) {
+      if (opts.defMode && sc && sc.def) return;
+      order.push({ sc: sc, isDef: false });
+    });
+
+    order.forEach(function (ent, oi) {
+      var sc = ent.sc, isDef = ent.isDef;
+      var box = document.createElement('details');
+      box.style.border = '1px solid var(--line)';
+      box.style.borderRadius = '8px';
+      box.style.padding = '6px 8px';
+      box.style.margin = '5px 0';
+      var sum2 = document.createElement('summary');
+      sum2.style.cursor = 'pointer';
+      sum2.style.fontSize = '12px';
+      paintSum2();
+      function paintSum2() {
+        var head = isDef ? '台本0 · 默认' : '台本 ' + oi;
+        sum2.textContent = head + '（' + (sc.lines || []).length + ' 行 · 权重 ' +
+          (sc.weight == null ? 1 : sc.weight) + (isDef && ent.virt && list.indexOf(sc) < 0 ? ' · 未修改' : '') + '）';
+      }
+      box.appendChild(sum2);
+
+      var inner = document.createElement('div');
+      inner.style.paddingTop = '6px';
+
+      /* 语音 + 权重 + 删除台本 */
+      var vr = document.createElement('div');
+      vr.style.display = 'flex';
+      vr.style.gap = '6px';
+      vr.style.alignItems = 'center';
+      var vi = document.createElement('input');
+      vi.type = 'text';
+      vi.placeholder = '语音文件名（自动到 voice 文件夹找）或完整路径；仅支持 ogg';
+      vi.style.flex = '1';
+      vi.value = sc.voice || '';
+      vi.addEventListener('input', function () { sc.voice = vi.value.trim(); });
+      vr.appendChild(vi);
+      var vBtn = document.createElement('button');
+      vBtn.className = 'btn sm';
+      vBtn.textContent = '试听';
+      vBtn.addEventListener('click', function () { playPreviewAudio(sc.voice); });
+      vr.appendChild(vBtn);
+      var wLbl = document.createElement('span');
+      wLbl.className = 'hint';
+      wLbl.textContent = '权重';
+      vr.appendChild(wLbl);
+      var wi = document.createElement('input');
+      wi.type = 'number';
+      wi.min = 0; wi.max = 100;
+      wi.title = '0 = 不参与随机（台本保留但不触发）';
+      wi.style.width = '56px';
+      wi.value = (sc.weight == null ? 1 : sc.weight);
+      wi.addEventListener('input', function () {
+        var n = parseInt(wi.value, 10);
+        sc.weight = (isFinite(n) && n >= 0) ? n : 1;
+        paintSum2(); paintSum();
+      });
+      vr.appendChild(wi);
+      var delBtn = document.createElement('button');
+      delBtn.className = 'btn sm';
+      if (isDef) {
+        delBtn.textContent = '恢复默认';
+        delBtn.title = '台本0 不可删除；恢复为默认差分轮播（清掉已保存的修改）';
+        delBtn.addEventListener('click', function () {
+          var idx = list.indexOf(sc);
+          if (idx >= 0) list.splice(idx, 1);
+          rebuild();
+        });
+      } else {
+        delBtn.textContent = '删除台本';
+        delBtn.addEventListener('click', function () {
+          var idx = list.indexOf(sc);
+          if (idx >= 0) list.splice(idx, 1);
+          rebuild();
+        });
+      }
+      vr.appendChild(delBtn);
+      inner.appendChild(vr);
+
+      /* 行列表：台词 + 差分 + 秒数 */
+      (sc.lines || []).forEach(function (line, li) {
+        var lr = document.createElement('div');
+        lr.style.display = 'flex';
+        lr.style.gap = '5px';
+        lr.style.alignItems = 'center';
+        lr.style.marginTop = '5px';
+
+        /* 0.3.6：台本行不再显示差分预览缩略图（老师要求移除；差分以图库为准） */
+
+        /* 0.3.15：差分 = 输入编号 + datalist 建议（防选项展示不全）；
+           编号不存在时桌宠/预览自动回退该学生 00 号差分 */
+        var sprInp = document.createElement('input');
+        sprInp.type = 'text';
+        sprInp.setAttribute('list', 'diffIds');   // 0.3.16：list 是只读 IDL，严格模式赋值抛 TypeError（模块全灭根因）
+        sprInp.className = 'adder';
+        sprInp.style.width = '92px';
+        sprInp.title = '差分编号（可自由输入；编号不存在时自动用 00 号差分）';
+        sprInp.placeholder = '差分…';
+        sprInp.value = line.spr || '';
+        sprInp.addEventListener('change', function () { line.spr = sprInp.value.trim(); });
+        lr.appendChild(sprInp);
+
+        var ti = document.createElement('input');
+        ti.type = 'text';
+        ti.placeholder = '台词（留空 = 只换差分不出台词；支持 {processing} 等变量）';
+        ti.style.flex = '1';
+        ti.value = line.text || '';
+        ti.addEventListener('input', function () { line.text = ti.value; });
+        lr.appendChild(ti);
+
+        var secI = document.createElement('input');
+        secI.type = 'number';
+        secI.min = 1; secI.max = 600;
+        secI.title = '该行显示秒数，到了自动切下一行';
+        secI.style.width = '56px';
+        secI.value = line.sec || 3;
+        secI.addEventListener('input', function () {
+          var n = parseInt(secI.value, 10);
+          line.sec = (isFinite(n) && n > 0) ? n : 3;
+        });
+        lr.appendChild(secI);
+        var secU = document.createElement('span');
+        secU.className = 'hint';
+        secU.textContent = '秒';
+        lr.appendChild(secU);
+
+        var lx = document.createElement('button');
+        lx.className = 'btn sm';
+        lx.textContent = '×';
+        lx.title = '删除这一行';
+        lx.addEventListener('click', function () {
+          var arr = sc.lines;
+          var idx = arr.indexOf(line);
+          if (idx >= 0) arr.splice(idx, 1);
+          rebuild();
+        });
+        lr.appendChild(lx);
+        inner.appendChild(lr);
+      });
+
+      var addLine = document.createElement('button');
+      addLine.className = 'btn sm';
+      addLine.textContent = '＋添加一行';
+      addLine.style.marginTop = '5px';
+      addLine.addEventListener('click', function () {
+        (sc.lines = sc.lines || []).push({ text: '', spr: '', sec: 3 });
+        rebuild();
+      });
+      inner.appendChild(addLine);
+
+      box.appendChild(inner);
+      body.appendChild(box);
+    });
+
+    det.appendChild(body);
+    host.appendChild(det);
+  }
+
+  /* =======================================================
+     设置预设（0.2.4）：整套设置存 userData/presets/
+     ======================================================= */
+  function refreshPresets() {
+    if (!el.presetList) return;
+    if (!(window.petHost && typeof window.petHost.presetsList === 'function')) {
+      el.presetList.innerHTML = '<div class="hint">（非宿主环境，读不到预设）</div>';
+      return;
+    }
+    window.petHost.presetsList().then(function (list) {
+      el.presetList.innerHTML = '';
+      if (!list || !list.length) {
+        var e = document.createElement('div');
+        e.className = 'hint';
+        e.textContent = '（还没有预设。在上面起个名字，点「保存当前设置为预设」）';
+        el.presetList.appendChild(e);
+        return;
+      }
+      list.forEach(function (p) {
+        var row = document.createElement('div');
+        row.className = 'row';
+        row.style.alignItems = 'center';
+        var lbl = document.createElement('span');
+        lbl.className = 'lbl';
+        var d = new Date(p.mtime);
+        lbl.textContent = p.name + '（' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' 保存）';
+        row.appendChild(lbl);
+        var btns = document.createElement('div');
+        btns.style.display = 'flex';
+        btns.style.gap = '6px';
+        var applyBtn = document.createElement('button');
+        applyBtn.className = 'btn sm primary';
+        applyBtn.textContent = '应用';
+        applyBtn.addEventListener('click', function () {
+          if (!confirm('应用预设「' + p.name + '」会覆盖当前全部设置，确定吗？')) return;
+          window.petHost.presetsLoad(p.file).then(function (loaded) {
+            if (!loaded) { setStatus('读取预设失败', true); return; }
+            delete loaded.presetName;
+            cfg = loaded;
+            window.petHost.saveConfig(cfg).then(function () {
+              cfg.pillVisible = cfg.pillVisible || {};
+              cfg.bubble = cfg.bubble || {};
+              editVer = (cfg.mode === 'v1' || cfg.mode === 'v2') ? cfg.mode : 'v2';
+              curMode = (DEF[editVer].modes[0] || ['idle'])[0];
+              sync(); buildMap(); buildGallery(); paintHourly(); refreshPresets();
+              setStatus('已应用预设「' + p.name + '」');
+            }).catch(function (e2) { setStatus('应用失败：' + e2.message, true); });
+          }).catch(function (e2) { setStatus('读取失败：' + e2.message, true); });
+        });
+        btns.appendChild(applyBtn);
+        var delBtn = document.createElement('button');
+        delBtn.className = 'btn sm';
+        delBtn.textContent = '删除';
+        delBtn.addEventListener('click', function () {
+          if (!confirm('删除预设「' + p.name + '」？不可恢复。')) return;
+          window.petHost.presetsDelete(p.file).then(function () {
+            refreshPresets();
+            setStatus('已删除预设「' + p.name + '」');
+          }).catch(function (e2) { setStatus('删除失败：' + e2.message, true); });
+        });
+        btns.appendChild(delBtn);
+        row.appendChild(btns);
+        el.presetList.appendChild(row);
+      });
+    }).catch(function () {
+      el.presetList.innerHTML = '<div class="hint">（读取预设列表失败）</div>';
+    });
+  }
+  if (el.presetSaveBtn) {
+    el.presetSaveBtn.addEventListener('click', function () {
+      if (!cfg) return;
+      var name = (el.presetName.value || '').trim();
+      if (!name) { setStatus('请先填预设名', true); return; }
+      window.petHost.presetsSave({ name: name, cfg: cfg }).then(function (r) {
+        if (r && r.ok) { setStatus('已保存预设「' + name + '」'); el.presetName.value = ''; refreshPresets(); }
+        else setStatus((r && r.error) || '保存失败', true);
+      }).catch(function (e) { setStatus('保存失败：' + e.message, true); });
+    });
+  }
+  if (el.presetOpenBtn) {
+    el.presetOpenBtn.addEventListener('click', function () {
+      if (window.petHost && typeof window.petHost.presetsOpen === 'function') window.petHost.presetsOpen();
+    });
+  }
+
+  /* =======================================================
+     图库 + 大图预览
+     ======================================================= */
+  /* 0.3.6 图库浏览系列：默认 = 当前激活学生；可切到任意系列实时预览其差分 */
+  var gPackList = { v1: [], v2: [] };     // packs-list 缓存（含 ids/url）
+  var gBrowse = { v1: 'miyo', v2: 'miyo' };
+  /* 0.3.18 网页端资源探测：导出副本可能放在 exe 旁（相对 prototype/v2/）
+     或与源文件同目录（相对 ./）—— 用 400px 副本探针探测后重写 DEF.dir 并重建 */
+  function webProbeSrc(base) { return base + 'v2/assets/full_low/00.png'; }
+  function applyWebBase() {
+    ['v1', 'v2'].forEach(function (v) {
+      if (!WEB_ASSETS) return;
+      DEF[v].dir = WEB_ASSETS + v + '/assets/' + (v === 'v1' ? 'spr/' : 'full_low/');
+      if (v === 'v2') DEF.v2.dirFullLow = WEB_ASSETS + 'v2/assets/full_low/';
+    });
+    WEB_VOICE = WEB_ASSETS ? (WEB_ASSETS + 'voice/') : null;
+    __galKey = '';
+    buildMap(); buildGallery(); paintHourly();
+  }
+  function probeWebBase() {
+    /* 0.3.20：候选含导出附带的 miyo-web/（便携版包内资源网页端不可达，
+       构建时把美代差分副本复制到 exe 旁 miyo-web/ 供网页端使用） */
+    const cands = ['prototype/v2/', 'miyo-web/', './'];
+    const im = new Image();
+    let i = 0;
+    im.onload = function () {
+      WEB_ASSETS = cands[i];
+      applyWebBase();
+      setStatus('网页端模式：已定位差分资源（' + WEB_ASSETS + '），配置与预设保存在浏览器 localStorage');
+    };
+    im.onerror = function () {
+      i++;
+      if (i < cands.length) { im.src = webProbeSrc(cands[i]); return; }
+      WEB_ASSETS = null;
+      applyWebBase();
+      setStatus('网页端模式：未找到差分资源（图库预览不可用）——配置与预设保存/读取不受影响', true);
+    };
+    im.src = webProbeSrc(cands[0]);
+  }
+
+  /* 0.3.12：差分选项 = 当前学生清单 ∪ 美代内置（去重排序）——
+     解决「当前学生张数少 → 可选项不足」；学生包缺的编号运行时回退 00 */
+  /* 0.3.14：数字感知排序 —— 00,01,…,20,99 然后 Eye_Close_01/Idle_01 等命名差分，
+     下拉顺序与直觉一致（此前字符串排序把 10-20 排到 99 之后，造成「选项不全」错觉） */
+  function sortDiffIds(arr) {
+    return arr.slice().sort(function (a, b) {
+      const na = parseInt(a, 10), nb = parseInt(b, 10);
+      const da = isFinite(na) && String(na) === String(a), db = isFinite(nb) && String(nb) === String(b);
+      if (da && db) return na - nb || (a < b ? -1 : 1);
+      if (da) return -1;
+      if (db) return 1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  }
+  function diffOptionIds() {
+    const seen = {}, out = [];
+    namesOf().concat(DEF[editVer].names).forEach(function (id) {
+      if (!seen[id]) { seen[id] = 1; out.push(id); }
+    });
+    return sortDiffIds(out);
+  }
+  /* 0.3.11：图库/预览统一取图 —— 浏览系列 URL 映射优先；
+     输入/引用了不存在的编号 → 回退该学生 00 号差分（老师要求） */
+  function galFile(id, full) {
+    var srcG = gallerySource();
+    if (srcG.urls) {
+      if (srcG.urls[id]) return srcG.urls[id];
+      if (srcG.urls['00']) return srcG.urls['00'];
+    }
+    /* 0.3.23：预览大图用 full 原图（full 参数），缩略用 low 副本 */
+    return (full && editVer === 'v2') ? DEF.v2.fileFull(id) : DEF[editVer].file(id);
+  }
+  /* 0.3.15：差分 datalist 建议表（全局一份；输入框可自由填写任意编号，
+     不存在的编号运行时回退该学生 00 号差分） */
+  function refreshDiffList() {
+    var dl = document.getElementById('diffIds');
+    if (!dl) {
+      dl = document.createElement('datalist');
+      dl.id = 'diffIds';
+      document.body.appendChild(dl);
+    }
+    dl.innerHTML = '';
+    diffOptionIds().forEach(function (id) {
+      var o = document.createElement('option');
+      o.value = id;
+      dl.appendChild(o);
+    });
+  }
+  function gallerySource() {
+    var pack = gPackList[editVer] && gPackList[editVer].find(function (p) { return p.dir === gBrowse[editVer]; });
+    /* 0.3.7：files = 编号 → 实际文件名映射（兼容原始 *_spr_XX 命名） */
+    if (pack && pack.ids && pack.ids.length && pack.urls) return { ids: pack.ids, urls: pack.urls };
+    return { ids: namesOf(), urls: null };
+  }
+  var __galKey = '';
+  function buildGallery() {
+    /* 0.3.11 性能：浏览系列/清单/版本未变时只刷高亮，不重建 37 张原图 DOM
+       （此前每次保存都全量重建 → 大图反复解码 = 设置页卡顿主因） */
+    var galKey = editVer + '|' + gBrowse[editVer] + '|' + namesOf().length;
+    refreshDiffList();
+    if (galKey === __galKey && el.gallery.childNodes.length) { paintGallery(); return; }
+    __galKey = galKey;
+    el.gallery.innerHTML = '';
+    var srcG = gallerySource();
+    el.galCount.textContent = srcG.ids.length;
+    var frag = document.createDocumentFragment();
+    srcG.ids.forEach(function (id) {
+      var img = document.createElement('img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      /* 0.3.23：缩略图路径统一走 DEF（跟随 applyWebBase 修正后的 dir）——
+         此前硬编码 './assets/full_low/'，网页端探针成功后缩略图仍裂图 */
+      img.src = (srcG.urls && srcG.urls[id]) ? srcG.urls[id]
+        : (editVer === 'v2' ? DEF.v2.fileLow(id) : DEF.v1.file(id));
+      img.loading = 'lazy';
+      img.alt = id;
+      img.title = id + '（单击看大图）';
+      img.setAttribute('data-id', id);
+      img.className = (editVer === 'v1') ? 'spr' : '';
+      /* 悬停 / 单击 → 大图预览（0.2.6 起图库只作预览，不再改差分映射） */
+      img.addEventListener('mouseenter', function () { showPreview(id); });
+      img.addEventListener('click', function () { showPreview(id); });
+      frag.appendChild(img);
+    });
+    el.gallery.appendChild(frag);
+    paintGallery();
+    showPreview(namesOf()[0]);
+  }
+
+  /* 0.3.19：预览缩放 + 聚焦位置（transform-origin 即聚焦点） */
+  var pvZ = 1, pvX = 50, pvY = 50;
+  function applyPvTransform() {
+    if (!el.previewImg) return;
+    el.previewImg.style.transformOrigin = pvX + '% ' + pvY + '%';
+    el.previewImg.style.transform = 'scale(' + pvZ + ')';
+  }
+  function bindPvCtl() {
+    if (!el.pvZoom) return;
+    el.pvZoom.addEventListener('input', function () {
+      pvZ = parseFloat(el.pvZoom.value) || 1;
+      el.pvZoomVal.textContent = pvZ.toFixed(1) + '×';
+      applyPvTransform();
+    });
+    el.pvFx.addEventListener('input', function () { pvX = parseFloat(el.pvFx.value) || 50; applyPvTransform(); });
+    el.pvFy.addEventListener('input', function () { pvY = parseFloat(el.pvFy.value) || 50; applyPvTransform(); });
+  }
+
+  /* 0.3.23：补齐 web 差分枚举依赖的辅助函数（此前 isSafePackName/extractSpriteId
+     均未定义 → ReferenceError 被吞 → 「已连接：0 个系列」的根因之一） */
+  function isSafePackName(n) {
+    if (typeof n !== 'string' || !n || n !== n.trim() || n.length > 60) return false;
+    if (/[\\/:*?"<>|]/.test(n) || n.indexOf('..') >= 0) return false;
+    return true;
+  }
+  /* 0.3.23：原始命名兼容 —— NP0083_spr_00.png → 00（与主进程/pet 页同规则） */
+  function extractSpriteId(baseName) {
+    const m = /(?:^|_)spr_(.+)$/i.exec(baseName);
+    return m ? m[1] : baseName;
+  }
+  /* 0.3.19 web 差分浏览器：连接 exe 旁 packs 文件夹（File System Access API），
+     递归枚举 v1/<名>/ 与 v2/<名>/ 的 png/jpg → 构建 gPackList（与宿主同构） */
+  function webWalkPngs(dh, entry, depth) {
+    if (depth > 2) return Promise.resolve();
+    const jobs = [];
+    return new Promise(function (resolve) {
+      const it = dh.values();
+      (function step() {
+        it.next().then(function (r) {
+          if (r.done) return Promise.all(jobs).then(resolve, resolve);
+          if (r.value.kind === 'directory') {
+            const sub = webWalkPngs(r.value, entry, depth + 1);
+            jobs.push(sub);
+            sub.then(step, step);
+            return;
+          }
+          const m = /^(.+)\.(png|jpe?g)$/i.exec(r.value.name);
+          if (!m) { step(); return; }
+          const id = extractSpriteId(m[1]);
+          r.value.getFile().then(function (f) {
+            if (!entry.urls[id]) {
+              entry.ids.push(id);
+              entry.urls[id] = URL.createObjectURL(f);
+            }
+            step();
+          }, function () { step(); });
+        }, function () { resolve(); });
+      })();
+    });
+  }
+  function webGatherPacks(dirHandle) {
+    const out = { v1: [], v2: [] };
+    let chain = Promise.resolve();
+    ['v1', 'v2'].forEach(function (ver) {
+      chain = chain.then(function () {
+        return dirHandle.getDirectoryHandle(ver).then(function (verDir) {
+          const names = [];
+          const it = verDir.values();
+          return new Promise(function (resolve) {
+            (function step() {
+              it.next().then(function (r) {
+                if (r.done) return resolve();
+                if (r.value.kind === 'directory' && isSafePackName(r.value.name)) names.push({ name: r.value.name, dh: r.value });
+                step();
+              }, function () { resolve(); });
+            })();
+          }).then(function () {
+            return names.reduce(function (ch, it2) {
+              return ch.then(function () {
+                const entry = { dir: it2.name, label: (it2.name === 'miyo' ? '美代（内置副本）' : it2.name), ids: [], urls: {} };
+                return it2.dh.getFileHandle('manifest.json').then(function (mfh) {
+                  return mfh.getFile().then(function (mf) { return mf.text(); });
+                }).then(function (txt) {
+                  const j = JSON.parse(txt);
+                  if (j && j.label) entry.label = String(j.label).slice(0, 30);
+                }).catch(function () { /* 无 manifest */ })
+                  .then(function () { return webWalkPngs(it2.dh, entry, 0); })
+                  .then(function () { if (entry.ids.length) out[ver].push(entry); });
+              });
+            }, Promise.resolve());
+          });
+        }, function () { /* 无该版本目录 */ });
+      });
+    });
+    /* 0.3.22 修复：等待枚举链全部完成再返回 out ——
+       此前同步返回空 out（异步枚举被丢弃）=「已连接：0 个系列」的根因 */
+    return chain.then(function () { return out; });
+  }
+  function bindGalConnect() {
+    if (!el.galConnect) return;
+    el.galConnect.addEventListener('click', function () {
+      window.showDirectoryPicker({ mode: 'read', id: 'miyo-packs' }).then(function (h) {
+        return webGatherPacks(h).then(function (list) {
+          gPackList = list;
+          const total = list.v1.length + list.v2.length;
+          const detail = list.v1.concat(list.v2).map(function (p) { return p.label + '(' + p.ids.length + ')'; }).join('、');
+          setStatus('已读取差分文件夹：' + total + ' 个系列 —— ' + detail);
+          const diag = document.getElementById('galDiag');
+          if (diag) diag.textContent = '已连接：' + total + ' 个系列（' + detail + '）';
+          /* 0.3.21：浏览系列下拉同步重填（web 端 packsList 为 null，必须在这里填） */
+          if (el.gSerSel) {
+            el.gSerSel.innerHTML = '';
+            const gmap = {}, gorder = [];
+            ['v1', 'v2'].forEach(function (ver) {
+              (list[ver] || []).forEach(function (p) {
+                if (!gmap[p.dir]) { gmap[p.dir] = { dir: p.dir, label: p.label, vers: [] }; gorder.push(gmap[p.dir]); }
+                gmap[p.dir].vers.push(ver);
+              });
+            });
+            gorder.forEach(function (p) {
+              const o = document.createElement('option');
+              o.value = p.dir;
+              o.textContent = p.label + '（' + p.vers.length + ' 版 ' + (gmap[p.dir].ids || []).length + ' 张）'.replace('0 张）', '张）');
+              el.gSerSel.appendChild(o);
+            });
+            if (!gBrowse[editVer] || !gmap[gBrowse[editVer]]) {
+              gBrowse[editVer] = gorder[0] ? gorder[0].dir : 'miyo';
+            }
+            el.gSerSel.value = gBrowse[editVer];
+          }
+          __galKey = '';
+          buildGallery();
+        });
+      }).catch(function (e) {
+        if (e && e.name === 'AbortError') { setStatus('已取消', false); return; }
+        setStatus('读取差分文件夹失败：' + (e && e.message || e), true);
+      });
+    });
+  }
+
+  function showPreview(id) {
+    if (!id) return;
+    /* 0.3.11：预览大图跟随浏览系列（此前固定走美代内置路径） */
+    el.previewImg.src = galFile(id, true);
+    el.previewImg.decoding = 'async';
+    el.pvId.textContent = id;
+    el.pvState.textContent = '· 预览（当前目标：' + stateLabel(curMode) + '）';
+    el.previewImg.setAttribute('data-id', id);
+  }
+
+  function paintGallery() {
+    var inUse = {};
+    var arr = idsOf(curMode);
+    arr.forEach(function (id) { inUse[id] = 1; });
+    var imgs = el.gallery.querySelectorAll('img');
+    for (var i = 0; i < imgs.length; i++) {
+      imgs[i].classList.toggle('in', !!inUse[imgs[i].getAttribute('data-id')]);
+    }
+  }
+
+  el.pvSetFirst.addEventListener('click', function () {
+    setStatus('台本模式下无需设首图：台本每一行都自选差分（「差分…」= 用该状态默认首图）');
+  });
+
+  /* =======================================================
+     开关
+     ======================================================= */
+  function paintSeg() {
+    var bs = el.segMode.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].classList.toggle('on', bs[i].getAttribute('data-mode') === cfg.mode);
+    }
+  }
+  function paintScope() {
+    var bs = el.segScope.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].classList.toggle('on', bs[i].getAttribute('data-scope') === (cfg.scope || 'current'));
+    }
+    el.scopeNote.innerHTML = (cfg.scope === 'all')
+      ? '<b style="color:#8a5f1f">当前是「全部会话」：桌宠会把历史会话的待办也算进来，数字可能比 WorkBuddy 界面大。</b>'
+      : '只统计「当前会话」时，桌宠的数字与 WorkBuddy 界面看到的一致。';
+  }
+  function paintBubAlign() {
+    var bs = el.segBubAlign.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].classList.toggle('on', bs[i].getAttribute('data-align') === cfg.bubble.align);
+    }
+  }
+
+  el.segMode.addEventListener('click', function (e) {
+    if (!cfg) return;
+    var b = e.target.closest('button');
+    if (!b) return;
+    var m = b.getAttribute('data-mode');
+    if (cfg.mode !== m) {
+      cfg.mode = m;
+      editVer = m;                       // 顺手把编辑对象切到新版本
+      curMode = (DEF[editVer].modes[0] || ['idle'])[0];
+      paintSeg(); buildMap(); buildGallery(); paintHourly();
+      /* 0.3.6：空闲行不再按版本隐藏（v1 也有空闲胶囊）；修复文案框与开关错位 */
+      el.rowIdle.style.display = '';
+      el.rowIdleText.style.display = '';
+    }
+  });
+
+  el.segScope.addEventListener('click', function (e) {
+    if (!cfg) return;
+    var b = e.target.closest('button');
+    if (!b) return;
+    cfg.scope = b.getAttribute('data-scope') === 'all' ? 'all' : 'current';
+    paintScope();
+  });
+
+  el.segBubAlign.addEventListener('click', function (e) {
+    if (!cfg) return;
+    var b = e.target.closest('button');
+    if (!b) return;
+    cfg.bubble.align = b.getAttribute('data-align');
+    paintBubAlign();
+  });
+  /* 气泡外观（0.3.1）：名字 / 颜色与字体；缩放类滑条走下方 bindBub 统一绑定 */
+  el.bubName.addEventListener('input', function () {
+    if (!cfg) return;
+    cfg.bubble.name = String(el.bubName.value || '').trim().slice(0, 20) || '美代';
+  });
+  el.bubBgA.addEventListener('input', function () {
+    if (!cfg) return;
+    cfg.bubble.bgOpacity = Math.max(0.1, Math.min(1, parseFloat(el.bubBgA.value) || 1));
+    el.bubBgAVal.textContent = Math.round(cfg.bubble.bgOpacity * 100) + '%';
+  });
+  el.bubNmC.addEventListener('input', function () { if (cfg) cfg.bubble.nameColor = el.bubNmC.value; });
+  el.bubTxC.addEventListener('input', function () { if (cfg) cfg.bubble.textColor = el.bubTxC.value; });
+  el.bubBg.addEventListener('input', function () { if (cfg) cfg.bubble.bg = el.bubBg.value; });
+  el.bubBc.addEventListener('input', function () { if (cfg) cfg.bubble.borderColor = el.bubBc.value; });
+  el.bubNmFont.addEventListener('input', function () {
+    if (!cfg) return;
+    cfg.bubble.nameFont = String(el.bubNmFont.value || '').trim().slice(0, 80);
+  });
+  el.bubTxFont.addEventListener('input', function () {
+    if (!cfg) return;
+    cfg.bubble.textFont = String(el.bubTxFont.value || '').trim().slice(0, 80);
+  });
+
+  el.scale.addEventListener('input', function () {
+    if (!cfg) return;
+    cfg.scale = parseFloat(el.scale.value);
+    /* 0.3.5：取消每学生倍率 —— 所有学生共用一套；范围 0.5–2.5 适配不同立绘 */
+    el.scaleVal.textContent = cfg.scale.toFixed(2) + '×';
+  });
+  /* 0.3.16：全局错误浮窗 —— 渲染期任何未捕获异常直接显示在悬浮栏，
+     不再黑箱（此前 input.list 只读赋值让三个模块静默全灭，排查了一整天） */
+  window.addEventListener('error', function (ev) {
+    try {
+      if (el.status) {
+        el.status.textContent = '页面错误：' + String(ev.message || ev.error || '未知').slice(0, 90);
+        el.status.style.color = '#c0392b';
+      }
+    } catch (eS) { /* ignore */ }
+  });
+  window.addEventListener('unhandledrejection', function (ev) {
+    try {
+      const r = ev.reason;
+      if (el.status) {
+        el.status.textContent = '异步错误：' + String((r && r.message) || r || '未知').slice(0, 90);
+        el.status.style.color = '#c0392b';
+      }
+    } catch (eS) { /* ignore */ }
+  });
+
+  /* 0.3.2/0.3.3：把保存 / 恢复默认 / 状态提示 移到左下角悬浮栏（不随滚动消失） */
+  try {
+    if (el.savebar && el.save && el.reset && el.status) {
+      el.savebar.appendChild(el.save);
+      el.savebar.appendChild(el.reset);
+      el.savebar.appendChild(el.status);
+      /* 0.3.11：版本号常驻悬浮栏（老师要求设置页可见版号） */
+      if (el.appVer) {
+        el.appVer.style.cssText = 'font-size:12px;color:var(--ink-2);margin-left:2px;';
+        el.savebar.appendChild(el.appVer);
+      }
+    }
+  } catch (eSB) { /* 移动失败则按钮留在原位，保存功能不受影响 */ }
+  el.top.addEventListener('change', function () { cfg.alwaysOnTop = el.top.checked; });
+  el.lowMem.addEventListener('change', function () { if (cfg) cfg.lowMem = el.lowMem.checked; });
+  /* 胶囊位置/大小（0.3.6）：cfg.pillPos = { dx, dy, scale } */
+  function bindPillPos(id, key, valId, fmt) {
+    el[id].addEventListener('input', function () {
+      if (!cfg) return;
+      if (!cfg.pillPos || typeof cfg.pillPos !== 'object') cfg.pillPos = {};
+      cfg.pillPos[key] = parseFloat(el[id].value);
+      el[valId].textContent = fmt(cfg.pillPos[key]);
+    });
+  }
+  bindPillPos('pillDx', 'dx', 'pillDxVal', function (v) { return Math.round(v) + 'px'; });
+  bindPillPos('pillDy', 'dy', 'pillDyVal', function (v) { return Math.round(v) + 'px'; });
+  bindPillPos('pillSc', 'scale', 'pillScVal', function (v) { return v.toFixed(2) + '×'; });
+  /* 差分系列下拉（0.3.2）：清单来自主进程 packs-list；非宿主环境只有内置 */
+  function fillSeries(sel, flat, cur) {
+    sel.innerHTML = '';
+    (flat || [{ dir: 'miyo', label: '美代（默认）', vers: ['v1', 'v2'] }]).forEach(function (p) {
+      var o = document.createElement('option');
+      o.value = p.dir;
+      o.textContent = p.label + (p.vers && p.vers.length < 2 ? '（仅' + p.vers.join('/') + '）' : '');
+      if (p.dir === cur) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+  function buildSeriesSelects() {
+    var cur = (cfg && typeof cfg.series === 'string') ? cfg.series : 'miyo';
+    if (!(window.petHost && typeof window.petHost.packsList === 'function')) {
+      fillSeries(el.serSel, null, cur);
+      return;
+    }
+    window.petHost.packsList().then(function (list) {
+      gPackList = list || { v1: [], v2: [] };
+      /* v1/v2 清单合并：同名系列 = 同一学生（v1+v2 各一半） */
+      var order = [], map = {};
+      [['v1', list && list.v1], ['v2', list && list.v2]].forEach(function (pair) {
+        (pair[1] || []).forEach(function (p) {
+          if (!map[p.dir]) { map[p.dir] = { dir: p.dir, label: p.label, vers: [] }; order.push(map[p.dir]); }
+          map[p.dir].vers.push(pair[0]);
+        });
+      });
+      if (!order.length) order.push({ dir: 'miyo', label: '美代（默认）', vers: ['v1', 'v2'] });
+      fillSeries(el.serSel, order, cur);
+      /* 0.3.6 差分图库浏览下拉（按当前编辑版本列出可用系列） */
+      if (el.gSerSel) {
+        el.gSerSel.innerHTML = '';
+        var gcur = gBrowse[editVer] || 'miyo';
+        var glist = [{ dir: 'miyo', label: '美代（默认）', ids: DEF[editVer].names, urls: null }];
+        (gPackList[editVer] || []).forEach(function (p) {
+          glist.push({ dir: p.dir, label: p.label, ids: p.ids, urls: p.urls });
+        });
+        glist.forEach(function (p) {
+          var o = document.createElement('option');
+          o.value = p.dir; o.textContent = p.label + '（' + p.ids.length + ' 张）';
+          if (p.dir === gcur) o.selected = true;
+          el.gSerSel.appendChild(o);
+        });
+      }
+      /* 显示实际扫描到的外部 packs 根，方便核对文件夹放没放对位置 */
+      var note = document.getElementById('serNote');
+      if (note && window.petHost && typeof window.petHost.getConfig === 'function') {
+        window.petHost.getConfig().then(function (c) {
+          if (c && c.packsRoot) {
+            note.innerHTML = '当前外部差分目录：<b>' + String(c.packsRoot)
+              + '</b>（内含 v1/、v2/ 子目录，系列文件夹放里面）。'
+              + '检测到 ' + (order.length - 1) + ' 个外部系列。';
+          }
+        }).catch(function () {});
+      }
+    }).catch(function () { fillSeries(el.serSel, null, cur); });
+  }
+  el.serSel.addEventListener('change', function () {
+    if (!cfg) return;
+    cfg.series = el.serSel.value || 'miyo';
+  });
+  el.gSerSel.addEventListener('change', function () {
+    gBrowse[editVer] = el.gSerSel.value || 'miyo';
+    buildGallery();
+  });
+  /* WorkBuddy 状态检测开关（0.3.2）：总开关关 → 三个分类子开关禁用 */
+  function paintDetect() {
+    var off = !(cfg && cfg.detect && cfg.detect.enabled !== false);
+    el.detApproval.disabled = off;
+    el.detWorking.disabled = off;
+    el.detPending.disabled = off;
+  }
+  el.detEnabled.addEventListener('change', function () {
+    if (!cfg) return;
+    if (!cfg.detect || typeof cfg.detect !== 'object') cfg.detect = {};
+    cfg.detect.enabled = el.detEnabled.checked;
+    paintDetect();
+  });
+  el.detApproval.addEventListener('change', function () {
+    if (!cfg) return;
+    if (!cfg.detect || typeof cfg.detect !== 'object') cfg.detect = {};
+    cfg.detect.approval = el.detApproval.checked;
+  });
+  el.detWorking.addEventListener('change', function () {
+    if (!cfg) return;
+    if (!cfg.detect || typeof cfg.detect !== 'object') cfg.detect = {};
+    cfg.detect.working = el.detWorking.checked;
+  });
+  el.detPending.addEventListener('change', function () {
+    if (!cfg) return;
+    if (!cfg.detect || typeof cfg.detect !== 'object') cfg.detect = {};
+    cfg.detect.pending = el.detPending.checked;
+  });
+
+  /* 语音音量 + 重播冷却（0.2.9）+ 空闲档位阈值（0.2.4） */
+  el.volume.addEventListener('input', function () {
+    if (!cfg) return;
+    cfg.volume = parseFloat(el.volume.value);
+    if (!isFinite(cfg.volume)) cfg.volume = 1;
+    el.volumeVal.textContent = Math.round(cfg.volume * 100) + '%';
+  });
+  el.restMs.addEventListener('input', function () {
+    if (!cfg) return;
+    var sec = Math.max(0, Math.min(3600, parseInt(el.restMs.value, 10) || 0));
+    cfg.scriptRestMs = sec * 1000;
+    el.restMsVal.textContent = sec + ' 秒';
+  });
+  /* 闲置差分轮播间隔（0.2.12）+ 默认差分轮播间隔（0.2.13） */
+  el.idleSprMs.addEventListener('input', function () {
+    if (!cfg) return;
+    var sec = Math.max(1, Math.min(60, parseInt(el.idleSprMs.value, 10) || 7));
+    cfg.idleSprMs = sec * 1000;
+    el.idleSprMsVal.textContent = sec + ' 秒';
+  });
+  el.stateCycleMs.addEventListener('input', function () {
+    if (!cfg) return;
+    var sec = Math.max(1, Math.min(60, parseInt(el.stateCycleMs.value, 10) || 7));
+    cfg.stateCycleMs = sec * 1000;
+    el.stateCycleMsVal.textContent = sec + ' 秒';
+  });
+  [['idle5', 'idle_5'], ['idle15', 'idle_15'], ['idle30', 'idle_30']].forEach(function (pair) {
+    el[pair[0]].addEventListener('input', function () {
+      if (!cfg) return;
+      if (!cfg.idleSecs) cfg.idleSecs = { idle_5: 300, idle_15: 900, idle_30: 1800 };
+      var n = parseInt(el[pair[0]].value, 10);
+      if (isFinite(n) && n > 0) cfg.idleSecs[pair[1]] = n;
+    });
+  });
+
+  /* 胶囊显隐（注意：cfg 要到 getConfig() 回调才有值，handler 内取值，绝不能在绑定期解引用） */
+  function bindPill(id, key) {
+    el[id].addEventListener('change', function () {
+      if (cfg) cfg.pillVisible[key] = el[id].checked;
+    });
+  }
+  bindPill('vWorking', 'working');
+  bindPill('vAsking', 'asking');
+  bindPill('vIdle', 'idle');
+  bindPill('vConvs', 'conversations');
+  bindPill('vCredits', 'credits');
+  bindPill('vScope', 'scope');
+  /* 胶囊文案自定义（0.2.16）：即时写入 cfg.pillText，留空 = 删掉自定义用默认 */
+  var PILL_KEYS = [['txtApproval', 'approval'], ['txtWorking', 'working'], ['txtAsking', 'asking'],
+    ['txtIdle', 'idle'], ['txtConvs', 'conversations'], ['txtCredits', 'credits'], ['txtScope', 'scope']];
+  PILL_KEYS.forEach(function (pair) {
+    el[pair[0]].addEventListener('input', function () {
+      if (!cfg) return;
+      if (!cfg.pillText || typeof cfg.pillText !== 'object') cfg.pillText = {};
+      var v = String(el[pair[0]].value || '').trim();
+      if (v) cfg.pillText[pair[1]] = v.slice(0, 120);
+      else delete cfg.pillText[pair[1]];
+    });
+  });
+  el.vApproval.addEventListener('change', function () { if (cfg) cfg.showApproval = el.vApproval.checked; });
+
+  /* 气泡 */
+  function bindBub(id, key, valId, fmt) {
+    el[id].addEventListener('input', function () {
+      if (!cfg) return;
+      cfg.bubble[key] = parseFloat(el[id].value);
+      el[valId].textContent = fmt(cfg.bubble[key]);
+    });
+  }
+  bindBub('bubW', 'width', 'bubWVal', function (v) { return v + 'px'; });
+  bindBub('bubF', 'fontScale', 'bubFVal', function (v) { return v.toFixed(2) + '×'; });
+  bindBub('bubScale', 'scale', 'bubScaleVal', function (v) { return v.toFixed(2) + '×'; });
+  bindBub('bubNmF', 'nameScale', 'bubNmFVal', function (v) { return v.toFixed(2) + '×'; });
+  bindBub('bubX', 'offsetX', 'bubXVal', function (v) { return v + 'px'; });
+  bindBub('bubY', 'offsetY', 'bubYVal', function (v) { return v + 'px'; });
+
+  /* =======================================================
+     整点播报
+     ======================================================= */
+  function hourRow(h) {
+    var t = cfg.hourly.v2 || (cfg.hourly.v2 = {});   /* 0.3.6 台本合并 */
+    /* 0.2.10：只建 on + scripts（旧版 lines/sprs/voice/ms 字段保留不动，仅在没配台本时兜底） */
+    if (!t[h]) t[h] = { on: false, scripts: [] };
+    if (!Array.isArray(t[h].scripts)) t[h].scripts = [];
+    return t[h];
+  }
+
+  function paintHourly() {
+    el.hourlyBar.innerHTML = '';
+    for (var h = 0; h < 24; h++) {
+      var b = document.createElement('button');
+      b.className = 'hour' + (hourRow(h).on ? ' on' : '') + (h === selHour ? ' sel' : '');
+      b.textContent = (h < 10 ? '0' + h : h) + '';
+      b.setAttribute('data-hour', h);
+      b.title = h + ' 点：' + (hourRow(h).on ? '播报' : '不播');
+      el.hourlyBar.appendChild(b);
+    }
+    paintHourEdit();
+  }
+
+  function paintHourEdit() {
+    var o = hourRow(selHour);
+    el.hourTitle.textContent = (selHour < 10 ? '0' + selHour : selHour) + ':00 的播报';
+    el.hourOn.checked = !!o.on;
+
+    /* 播报文本（0.2.10 合并版）：台词/差分/秒数/语音都在台本里配 */
+    el.hourScriptBox.innerHTML = '';
+    appendScriptListEditor(hourRow(selHour).scripts, el.hourScriptBox, {
+      label: '播报', defMode: false, rebuildFn: paintHourEdit,
+      tip: '到点按权重随机选一个台本，顺序播放各行：每行 = 台词 + 差分 + 秒数，台词支持 {hour}；台本语音在开头播一次。'
+    });
+  }
+
+  el.hourlyBar.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-hour]');
+    if (!b) return;
+    selHour = parseInt(b.getAttribute('data-hour'), 10);
+    paintHourly();
+  });
+  el.hourOn.addEventListener('change', function () {
+    hourRow(selHour).on = el.hourOn.checked;
+    paintHourly();
+  });
+  el.hourAllOff.addEventListener('click', function () {
+    for (var h = 0; h < 24; h++) hourRow(h).on = false;
+    paintHourly();
+    setStatus('已把 24 小时全部关闭（记得保存）');
+  });
+  el.hourCopyAll.addEventListener('click', function () {
+    var src = hourRow(selHour);
+    var copy = { on: src.on, scripts: JSON.parse(JSON.stringify(src.scripts || [])) };
+    for (var h = 0; h < 24; h++) cfg.hourly.v2[h] = JSON.parse(JSON.stringify(copy));
+    paintHourly();
+    setStatus('已把 ' + selHour + ' 点的设置复制到 24 小时（记得保存）');
+  });
+  el.hourTest.addEventListener('click', function () {
+    var o = hourRow(selHour);
+    if (!(window.petHost && typeof window.petHost.playChime === 'function')) {
+      setStatus('非宿主环境，无法试播', true);
+      return;
+    }
+    window.petHost.saveConfig(cfg).then(function () {
+      window.petHost.playChime({
+        hour: selHour,
+        scripts: JSON.parse(JSON.stringify(o.scripts || []))
+      });
+      setStatus('已试播 ' + selHour + ' 点的报时（请把窗口切到桌宠看一眼）');
+    }).catch(function (e) { setStatus('试播失败：' + e.message, true); });
+  });
+
+  /* 重置此小时：完全回默认（关闭播报 + 清空台本与一切遗留字段） */
+  el.hourReset.addEventListener('click', function () {
+    cfg.hourly.v2[selHour] = { on: false, scripts: [] };
+    paintHourly();
+    setStatus('已重置 ' + selHour + ' 点的播报（保存后生效）');
+  });
+
+  /* =======================================================
+     待办提醒（0.2.9）：到点播提醒台本（alarm），单击桌宠确认 → 播确认台本（ack）→ 结束
+     ======================================================= */
+  var WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
+
+  function buildReminders() {
+    if (!Array.isArray(cfg.reminders)) cfg.reminders = [];
+    el.remindBox.innerHTML = '';
+    cfg.reminders.forEach(function (r, ri) { appendReminderEditor(r, ri, el.remindBox); });
+  }
+
+  function reminderDefaultScripts(r) {
+    return [{ weight: 1, voice: null, lines: [
+      { text: '老师，提醒时间到了。', spr: null, sec: 4 },
+      { text: '「' + (r.name || '待办事项') + '」——别忘了哦。', spr: null, sec: 4 },
+      { text: '点我一下，我就知道你收到了。', spr: null, sec: 5 }
+    ] }];
+  }
+
+  function appendReminderEditor(r, ri, host) {
+    var det = document.createElement('details');
+    det.style.border = '1px solid var(--line)';
+    det.style.borderRadius = '8px';
+    det.style.padding = '6px 8px';
+    det.style.margin = '5px 0';
+    var sum = document.createElement('summary');
+    sum.style.cursor = 'pointer'; sum.style.fontSize = '12px';
+    det.appendChild(sum);
+    function paintSum() {
+      var t = (r.hh < 10 ? '0' + r.hh : r.hh) + ':' + (r.mm < 10 ? '0' + r.mm : r.mm);
+      sum.textContent = '提醒 ' + (ri + 1) + ' · ' + (r.name || '未命名') + ' · ' + t +
+        ' · ' + ({ once: '仅一次', daily: '每天', weekly: '自定义' }[r.freq] || r.freq) +
+        (r.enabled ? '' : '（已停用）') + (r.done ? '（已触发，仅一次）' : '');
+    }
+    paintSum();
+    var body = document.createElement('div');
+    body.style.paddingTop = '6px';
+
+    /* 启用 / 名称 */
+    var row1 = document.createElement('div'); row1.className = 'row';
+    var lbl1 = document.createElement('span'); lbl1.className = 'lbl'; lbl1.textContent = '启用 / 名称';
+    var c1 = document.createElement('div');
+    var en = document.createElement('input'); en.type = 'checkbox';
+    en.checked = r.enabled !== false; en.style.marginRight = '8px'; en.title = '启用该提醒';
+    en.addEventListener('change', function () { r.enabled = en.checked; if (r.enabled) r.done = false; paintSum(); });
+    var nm = document.createElement('input'); nm.type = 'text'; nm.value = r.name || '';
+    nm.placeholder = '提醒名称（台词里用 {name} 引用）'; nm.style.width = '200px';
+    nm.addEventListener('input', function () { r.name = nm.value; paintSum(); });
+    c1.appendChild(en); c1.appendChild(nm);
+    row1.appendChild(lbl1); row1.appendChild(c1); body.appendChild(row1);
+
+    /* 时间 / 频率 */
+    var row2 = document.createElement('div'); row2.className = 'row';
+    var lbl2 = document.createElement('span'); lbl2.className = 'lbl'; lbl2.textContent = '时间 / 频率';
+    var c2 = document.createElement('div');
+    c2.style.display = 'flex'; c2.style.gap = '6px'; c2.style.alignItems = 'center';
+    var ih = document.createElement('input'); ih.type = 'number';
+    ih.min = 0; ih.max = 23; ih.value = r.hh; ih.style.width = '58px'; ih.title = '时（0–23）';
+    ih.addEventListener('input', function () {
+      r.hh = Math.max(0, Math.min(23, parseInt(ih.value, 10) || 0)); paintSum();
+    });
+    var colon = document.createElement('span'); colon.textContent = ':'; colon.className = 'hint';
+    var im = document.createElement('input'); im.type = 'number';
+    im.min = 0; im.max = 59; im.value = r.mm; im.style.width = '58px'; im.title = '分（0–59）';
+    im.addEventListener('input', function () {
+      r.mm = Math.max(0, Math.min(59, parseInt(im.value, 10) || 0)); paintSum();
+    });
+    var freq = document.createElement('select');
+    [['once', '仅一次'], ['daily', '每天'], ['weekly', '自定义（星期）']].forEach(function (p) {
+      var op = document.createElement('option'); op.value = p[0]; op.textContent = p[1];
+      if (r.freq === p[0]) op.selected = true;
+      freq.appendChild(op);
+    });
+    freq.addEventListener('change', function () { r.freq = freq.value; paintWeek(); paintSum(); });
+    c2.appendChild(ih); c2.appendChild(colon); c2.appendChild(im); c2.appendChild(freq);
+    row2.appendChild(lbl2); row2.appendChild(c2); body.appendChild(row2);
+
+    /* 星期（weekly 才显示） */
+    var rowW = document.createElement('div'); rowW.className = 'row';
+    var lblW = document.createElement('span'); lblW.className = 'lbl'; lblW.textContent = '星期';
+    var cW = document.createElement('div');
+    cW.style.display = 'flex'; cW.style.gap = '2px';
+    var dayBtns = [];
+    for (var d = 0; d < 7; d++) {
+      (function (d) {
+        var b = document.createElement('button'); b.className = 'btn sm'; b.textContent = WEEK_CN[d];
+        b.title = '周' + WEEK_CN[d] + '触发（点选/取消）';
+        b.addEventListener('click', function () {
+          if (!Array.isArray(r.days)) r.days = [];
+          var i = r.days.indexOf(d);
+          if (i >= 0) r.days.splice(i, 1); else { r.days.push(d); r.days.sort(function (a, b2) { return a - b2; }); }
+          paintWeek();
+        });
+        dayBtns.push({ b: b, d: d });
+        cW.appendChild(b);
+      })(d);
+    }
+    function paintWeek() {
+      dayBtns.forEach(function (e) { e.b.classList.toggle('primary', (r.days || []).indexOf(e.d) >= 0); });
+      rowW.style.display = (r.freq === 'weekly') ? '' : 'none';
+    }
+    rowW.appendChild(lblW); rowW.appendChild(cW); body.appendChild(rowW);
+    paintWeek();
+
+    /* 提醒台本 / 确认台本（共用台本编辑器，直接写进 r.scripts / r.ackScripts） */
+    if (!Array.isArray(r.scripts)) r.scripts = [];
+    if (!Array.isArray(r.ackScripts)) r.ackScripts = [];
+    appendScriptListEditor(r.scripts, body, { label: '提醒', defMode: false,
+      tip: '到点后循环重播（歇 5 秒），直到单击桌宠确认；未配置时用内置提醒台词（可被 {name} 引用）。' });
+    appendScriptListEditor(r.ackScripts, body, { label: '确认', defMode: false,
+      tip: '确认后播一次，播完提醒结束；未配置时用内置确认台词。' });
+
+    /* 测试 / 删除 */
+    var rowB = document.createElement('div'); rowB.className = 'row';
+    var lblB = document.createElement('span'); lblB.className = 'lbl';
+    var cB = document.createElement('div');
+    var testBtn = document.createElement('button'); testBtn.className = 'btn sm'; testBtn.textContent = '测试';
+    testBtn.title = '立刻播一次提醒台本（确认交互要在桌宠窗口上单击）';
+    testBtn.addEventListener('click', function () {
+      if (!(window.petHost && typeof window.petHost.playChime === 'function')) {
+        setStatus('非宿主环境，无法测试', true); return;
+      }
+      window.petHost.playChime({
+        hour: new Date().getHours(),
+        scripts: JSON.parse(JSON.stringify((r.scripts.length) ? r.scripts : reminderDefaultScripts(r)))
+      });
+      setStatus('已推送提醒测试（到桌宠窗口看效果；单击桌宠确认）');
+    });
+    var delBtn = document.createElement('button'); delBtn.className = 'btn sm'; delBtn.textContent = '删除';
+    delBtn.addEventListener('click', function () {
+      var i = cfg.reminders.indexOf(r);
+      if (i >= 0) cfg.reminders.splice(i, 1);
+      buildReminders();
+      setStatus('已删除该提醒（保存后生效）');
+    });
+    cB.appendChild(testBtn); cB.appendChild(delBtn);
+    rowB.appendChild(lblB); rowB.appendChild(cB); body.appendChild(rowB);
+
+    det.appendChild(body);
+    host.appendChild(det);
+  }
+
+  el.remindAdd.addEventListener('click', function () {
+    if (!cfg) return;
+    if (!Array.isArray(cfg.reminders)) cfg.reminders = [];
+    cfg.reminders.push({
+      id: 'r' + Date.now(), name: '新的待办', hh: 9, mm: 0,
+      freq: 'daily', days: [1, 2, 3, 4, 5], enabled: true, done: false, lastFired: '',
+      scripts: [], ackScripts: []
+    });
+    buildReminders();
+    setStatus('已新增提醒（设好时间与台本后记得保存）');
+  });
+
+  /* =======================================================
+     最近变化
+     ======================================================= */
+  var KIND_CN = { state: '状态', health: '健康', session: '会话', approval: '批准',
+                  boot: '启动', migration: '配置迁移', chime: '整点播报' };
+
+  function fmtTime(ts) {
+    var d = new Date(ts);
+    var p = function (n) { return n < 10 ? '0' + n : String(n); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+      p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+  function fmtDiff(e) {
+    if (!e || !e.next) return (e && e.reason) ? e.reason : '—';
+    var a = e.prev, b = e.next, parts = [];
+    var add = function (k, label) {
+      var x = a ? a[k] : null, y = b[k];
+      if (x !== y) parts.push(label + ' ' + (x == null ? '—' : x) + '→' + (y == null ? '—' : y));
+    };
+    add('processing', '处理中'); add('pending', '待办');
+    add('approval', '待批准'); add('completed', '已完成');
+    add('conversations', '进行中对话');
+    if (!parts.length) parts.push(e.kind || '变化');
+    return parts.join(' · ');
+  }
+  function renderHistory(rows) {
+    if (!rows || !rows.length) {
+      el.histList.innerHTML = '<div class="empty">还没有记录 —— 状态一变就会写进来。</div>';
+      return;
+    }
+    var html = '<table><thead><tr><th>时间</th><th>变化</th><th>类型</th><th>原因</th></tr></thead><tbody>';
+    rows.slice(0, 120).forEach(function (e) {
+      html += '<tr><td class="t">' + fmtTime(e.ts) + '</td>' +
+        '<td>' + fmtDiff(e) + '</td>' +
+        '<td class="k">' + (KIND_CN[e.kind] || e.kind || '-') + '</td>' +
+        '<td>' + String(e.reason || '').slice(0, 64) + '</td></tr>';
+    });
+    el.histList.innerHTML = html + '</tbody></table>';
+  }
+  function loadHistory() {
+    if (!(window.petHost && typeof window.petHost.getHistory === 'function')) {
+      el.histStats.textContent = '（非宿主环境，读不到历史）';
+      renderHistory([]);
+      return;
+    }
+    window.petHost.getHistory(120).then(renderHistory).catch(function () { renderHistory([]); });
+    if (typeof window.petHost.historyStats === 'function') {
+      window.petHost.historyStats().then(function (s) {
+        if (!s) return;
+        el.histStats.textContent = s.files + ' 个文件 · ' + (s.bytes / 1024).toFixed(1) + ' KB · 已写 ' +
+          s.written + ' 条' + (s.lastError ? ' · ⚠ ' + s.lastError : '');
+      }).catch(function () {});
+    }
+  }
+  el.histRefresh.addEventListener('click', loadHistory);
+  el.histOpen.addEventListener('click', function () {
+    if (window.petHost && typeof window.petHost.openHistory === 'function') window.petHost.openHistory();
+  });
+
+  /* =======================================================
+     保存 / 恢复 / 同步
+     ======================================================= */
+  el.save.addEventListener('click', function () {
+    /* 台本等编辑均即时写入 cfg（input 事件维护），这里直接整体保存。
+       ⚠️ 0.2.15 修复：保存成功后**绝不**把本地 cfg 换成主进程返回的新对象 ——
+       buildMap 时绑定的编辑器（闲置差分 chips / 台本 / 整点 / 互动…）引用的都是
+       旧 cfg 里的对象；换成新对象后这些编辑器全部脱钩，第二次起的所有修改
+       都写进了孤儿对象（「首次生效、再改无效；应用预设重绑后又生效一次」的根因）。
+       规范化的值（钳制/迁移）主进程自己会落盘并推给桌宠，本地无需采纳。 */
+    window.petHost.saveConfig(cfg).then(function () {
+      setStatus('已保存并生效');
+    }).catch(function (e) { setStatus('保存失败：' + e.message, true); });
+  });
+
+  el.reset.addEventListener('click', function () {
+    window.petHost.resetConfig().then(function (r) {
+      if (r && r.config) {
+        cfg = r.config; editVer = cfg.mode; curMode = (DEF[editVer].modes[0] || ['idle'])[0];
+        sync(); buildMap(); buildGallery(); paintHourly();
+      }
+      setStatus('已恢复默认');
+    }).catch(function (e) { setStatus('失败：' + e.message, true); });
+  });
+
+  function sync() {
+    el.scale.value = String(cfg.scale);
+    el.scaleVal.textContent = Number(cfg.scale).toFixed(2) + '×';
+    el.top.checked = !!cfg.alwaysOnTop;
+    el.lowMem.checked = cfg.lowMem !== false;
+    /* 胶囊位置/大小回填（0.3.6） */
+    if (!cfg.pillPos || typeof cfg.pillPos !== 'object') cfg.pillPos = {};
+    if (typeof cfg.pillPos.dx !== 'number') cfg.pillPos.dx = 0;
+    if (typeof cfg.pillPos.dy !== 'number') cfg.pillPos.dy = 0;
+    if (typeof cfg.pillPos.scale !== 'number') cfg.pillPos.scale = 1;
+    el.pillDx.value = String(cfg.pillPos.dx);
+    el.pillDxVal.textContent = Math.round(cfg.pillPos.dx) + 'px';
+    el.pillDy.value = String(cfg.pillPos.dy);
+    el.pillDyVal.textContent = Math.round(cfg.pillPos.dy) + 'px';
+    el.pillSc.value = String(cfg.pillPos.scale);
+    el.pillScVal.textContent = cfg.pillPos.scale.toFixed(2) + '×';
+    /* 检测开关 / 差分系列 回填（0.3.2） */
+    if (!cfg.detect || typeof cfg.detect !== 'object') cfg.detect = {};
+    ['enabled', 'approval', 'working', 'pending'].forEach(function (k) {
+      if (typeof cfg.detect[k] !== 'boolean') cfg.detect[k] = true;
+    });
+    el.detEnabled.checked = cfg.detect.enabled !== false;
+    el.detApproval.checked = cfg.detect.approval !== false;
+    el.detWorking.checked = cfg.detect.working !== false;
+    el.detPending.checked = cfg.detect.pending !== false;
+    paintDetect();
+    if (typeof cfg.series !== 'string' || !cfg.series) cfg.series = 'miyo';
+    buildSeriesSelects();
+    el.vApproval.checked = cfg.showApproval !== false;
+    el.vWorking.checked = cfg.pillVisible.working !== false;
+    el.vAsking.checked = cfg.pillVisible.asking !== false;
+    el.vIdle.checked = cfg.pillVisible.idle !== false;
+    el.vConvs.checked = cfg.pillVisible.conversations !== false;
+    if (cfg.pillVisible.credits === undefined) cfg.pillVisible.credits = true;
+    el.vCredits.checked = cfg.pillVisible.credits !== false;
+    /* 胶囊文案回填（0.2.16）：自定义了就显示自定义，否则留空走 placeholder 默认 */
+    if (!cfg.pillText || typeof cfg.pillText !== 'object') cfg.pillText = {};
+    [['txtApproval', 'approval'], ['txtWorking', 'working'], ['txtAsking', 'asking'],
+     ['txtIdle', 'idle'], ['txtConvs', 'conversations'], ['txtCredits', 'credits'],
+     ['txtScope', 'scope']].forEach(function (pair) {
+      el[pair[0]].value = (typeof cfg.pillText[pair[1]] === 'string') ? cfg.pillText[pair[1]] : '';
+    });
+    el.vScope.checked = cfg.pillVisible.scope !== false;
+    el.volume.value = String(typeof cfg.volume === 'number' ? cfg.volume : 1);
+    el.volumeVal.textContent = Math.round((typeof cfg.volume === 'number' ? cfg.volume : 1) * 100) + '%';
+    if (!cfg.idleSecs) cfg.idleSecs = { idle_5: 300, idle_15: 900, idle_30: 1800 };
+    el.idle5.value = String(cfg.idleSecs.idle_5 != null ? cfg.idleSecs.idle_5 : 300);
+    el.idle15.value = String(cfg.idleSecs.idle_15 != null ? cfg.idleSecs.idle_15 : 900);
+    el.idle30.value = String(cfg.idleSecs.idle_30 != null ? cfg.idleSecs.idle_30 : 1800);
+    el.bubW.value = String(cfg.bubble.width);
+    el.bubWVal.textContent = cfg.bubble.width + 'px';
+    el.bubF.value = String(cfg.bubble.fontScale);
+    el.bubFVal.textContent = Number(cfg.bubble.fontScale).toFixed(2) + '×';
+    /* 气泡外观回填（0.3.1）：缺省走默认值 */
+    if (!cfg.bubble.name) cfg.bubble.name = '美代';
+    if (typeof cfg.bubble.scale !== 'number') cfg.bubble.scale = 1;
+    if (typeof cfg.bubble.nameScale !== 'number') cfg.bubble.nameScale = 1;
+    if (typeof cfg.bubble.bgOpacity !== 'number') cfg.bubble.bgOpacity = 1;
+    if (!cfg.bubble.bg) cfg.bubble.bg = '#ffffff';
+    if (!cfg.bubble.borderColor) cfg.bubble.borderColor = '#e2e7ef';
+    if (!cfg.bubble.nameColor) cfg.bubble.nameColor = '#4f9c66';
+    if (!cfg.bubble.textColor) cfg.bubble.textColor = '#1e2430';
+    el.bubScale.value = String(cfg.bubble.scale);
+    el.bubScaleVal.textContent = cfg.bubble.scale.toFixed(2) + '×';
+    el.bubNmF.value = String(cfg.bubble.nameScale);
+    el.bubNmFVal.textContent = cfg.bubble.nameScale.toFixed(2) + '×';
+    el.bubName.value = cfg.bubble.name;
+    el.bubNmC.value = cfg.bubble.nameColor;
+    el.bubTxC.value = cfg.bubble.textColor;
+    el.bubBg.value = cfg.bubble.bg;
+    el.bubBc.value = cfg.bubble.borderColor;
+    el.bubNmFont.value = cfg.bubble.nameFont || '';
+    el.bubTxFont.value = cfg.bubble.textFont || '';
+    el.bubBgA.value = String(cfg.bubble.bgOpacity);
+    el.bubBgAVal.textContent = Math.round(cfg.bubble.bgOpacity * 100) + '%';
+    el.bubX.value = String(cfg.bubble.offsetX);
+    el.bubXVal.textContent = cfg.bubble.offsetX + 'px';
+    el.bubY.value = String(cfg.bubble.offsetY);
+    el.bubYVal.textContent = cfg.bubble.offsetY + 'px';
+    el.graceText.textContent = String(Math.round((cfg.hourlyGraceMs || 600000) / 60000));
+    el.restMs.value = String(Math.round((cfg.scriptRestMs != null ? cfg.scriptRestMs : 60000) / 1000));
+    el.restMsVal.textContent = el.restMs.value + ' 秒';
+    el.idleSprMs.value = String(Math.round((cfg.idleSprMs != null ? cfg.idleSprMs : 7000) / 1000));
+    el.idleSprMsVal.textContent = el.idleSprMs.value + ' 秒';
+    el.stateCycleMs.value = String(Math.round((cfg.stateCycleMs != null ? cfg.stateCycleMs : 7000) / 1000));
+    el.stateCycleMsVal.textContent = el.stateCycleMs.value + ' 秒';
+    el.rowIdle.style.display = (cfg.mode === 'v2') ? '' : 'none';
+    paintSeg();
+    paintScope();
+    paintBubAlign();
+  }
+
+  /* =======================================================
+     启动
+     ======================================================= */
+  function boot(c) {
+    cfg = c;
+    ['mapping', 'lines', 'voices', 'hourly', 'reacts', 'scripts'].forEach(function (k) {
+      if (!cfg[k]) cfg[k] = { v1: {}, v2: {} };
+      if (!cfg[k].v1) cfg[k].v1 = {};
+      if (!cfg[k].v2) cfg[k].v2 = {};
+    });
+    if (!cfg.pillVisible) cfg.pillVisible = { working: true, asking: true, idle: true, conversations: true, scope: true, credits: true };
+    if (cfg.pillVisible.credits === undefined) cfg.pillVisible.credits = true;
+    if (!cfg.bubble) cfg.bubble = { width: 196, fontScale: 1, offsetX: 0, offsetY: 0, align: 'right' };
+    if (!cfg.scope) cfg.scope = 'current';
+    if (cfg.showApproval === undefined) cfg.showApproval = true;
+    if (cfg.lowMem === undefined) cfg.lowMem = true;
+    if (!cfg.hourlyGraceMs) cfg.hourlyGraceMs = 600000;
+    if (!cfg.idleSecs) cfg.idleSecs = { idle_5: 300, idle_15: 900, idle_30: 1800 };
+    if (typeof cfg.volume !== 'number') cfg.volume = 1;
+    if (typeof cfg.scriptRestMs !== 'number') cfg.scriptRestMs = 60000;
+    if (typeof cfg.idleSprMs !== 'number' || !isFinite(cfg.idleSprMs) || cfg.idleSprMs < 1000) cfg.idleSprMs = 7000;
+    if (typeof cfg.stateCycleMs !== 'number' || !isFinite(cfg.stateCycleMs) || cfg.stateCycleMs < 1000) cfg.stateCycleMs = 7000;
+    /* 胶囊文案 / 闲置眨眼 / 摇晃 兜底（0.2.16） */
+    if (!cfg.pillText || typeof cfg.pillText !== 'object') cfg.pillText = {};
+    Object.keys(cfg.pillText).forEach(function (k) {
+      if (typeof cfg.pillText[k] !== 'string') delete cfg.pillText[k];
+    });
+    if (!cfg.idleBlink || typeof cfg.idleBlink !== 'object') cfg.idleBlink = { v1: {}, v2: {} };
+    if (!cfg.idleSway || typeof cfg.idleSway !== 'object') cfg.idleSway = { v1: {}, v2: {} };
+    if (!cfg.idleBreathe || typeof cfg.idleBreathe !== 'object') cfg.idleBreathe = { v1: {}, v2: {} };
+    ['v1', 'v2'].forEach(function (v) {
+      if (!cfg.idleBlink[v] || typeof cfg.idleBlink[v] !== 'object') cfg.idleBlink[v] = {};
+      if (!cfg.idleSway[v] || typeof cfg.idleSway[v] !== 'object') cfg.idleSway[v] = {};
+      if (!cfg.idleBreathe[v] || typeof cfg.idleBreathe[v] !== 'object') cfg.idleBreathe[v] = {};
+    });
+    if (!cfg.idleSprs || typeof cfg.idleSprs !== 'object') cfg.idleSprs = { v1: {}, v2: {} };
+    ['v1', 'v2'].forEach(function (v) {
+      if (!cfg.idleSprs[v] || typeof cfg.idleSprs[v] !== 'object') cfg.idleSprs[v] = {};
+    });
+    /* 旧配置一次性迁移（0.2.12）：restSprs 单值 → idleSprs 数组，然后清掉旧键，
+       避免老师清空闲置差分后被旧值「复活」 */
+    if (cfg.restSprs && typeof cfg.restSprs === 'object') {
+      ['v1', 'v2'].forEach(function (v) {
+        var old = cfg.restSprs[v];
+        if (!old || typeof old !== 'object') return;
+        Object.keys(old).forEach(function (mode) {
+          if (!Array.isArray(cfg.idleSprs[v][mode]) && old[mode]) cfg.idleSprs[v][mode] = [old[mode]];
+        });
+      });
+      cfg.restSprs = { v1: {}, v2: {} };
+    }
+    if (!Array.isArray(cfg.reminders)) cfg.reminders = [];
+
+    if (!WEB_MODE && el.presetConnect) el.presetConnect.style.display = 'none';
+    /* 0.3.19：宿主 = 差分图库移除（保流畅）；网页 = 仅差分浏览（其余卡隐藏） */
+    document.body.classList.add(WEB_MODE ? 'web-only' : 'host-mode');
+    bindPvCtl();
+
+    /* 程序版本（0.2.10）：一眼核对跑的是新包还是旧包 */
+    if (el.appVer) {
+      if (window.petHost && typeof window.petHost.getAppVersion === 'function') {
+        window.petHost.getAppVersion().then(function (v) {
+          el.appVer.textContent = 'v' + v;
+        }).catch(function () { el.appVer.textContent = '（未知）'; });
+      } else el.appVer.textContent = '（开发态，非宿主）';
+    }
+
+    /* 0.3.18 网页端：状态提示 + 差分资源基址探测（导出副本相对位置自适应） */
+    if (WEB_MODE) {
+      document.body.classList.add(WEB_ONLY ? 'web-only' : 'web-config');
+      if (WEB_ONLY) setStatus('差分浏览页：点「📁 连接差分文件夹」选择 exe 旁的 packs 文件夹，即可浏览全部学生差分');
+      probeWebBase();
+      bindGalConnect();
+      /* 0.3.20：连接按钮显示（0.3.19 漏了显示逻辑，导致识别不到其他学生） */
+      if (el.galConnect) el.galConnect.style.display = '';
+      /* 布局重排：预览（pv）整体移到左列；缩放/聚焦滑条移到右侧卡（与浏览系列同列） */
+      try {
+        const pv = document.querySelector('.pv');
+        const side = document.querySelector('.side');
+        if (pv && side && !document.getElementById('pvPane')) {
+          const pane = document.createElement('div');
+          pane.id = 'pvPane';
+          side.parentNode.insertBefore(pane, side);
+          pane.appendChild(pv);
+          const ctl = document.getElementById('pvCtl');
+          const gBody = document.querySelector('#galleryCard .body');
+          if (ctl && gBody) gBody.insertBefore(ctl, document.getElementById('gallery'));
+          const gc = document.getElementById('galConnect');
+          if (gc && gBody) gBody.insertBefore(gc, gBody.firstChild);
+        }
+      } catch (eL) { /* 布局重排失败不影响功能 */ }
+      /* 预设文件夹连接（File System Access API）：恢复记忆的句柄或等待老师点击连接 */
+      if (el.presetConnect) {
+        if (!WEB_FS.supported) { el.presetConnect.style.display = 'none'; }
+        else {
+          el.presetConnect.style.display = '';
+          el.presetConnect.textContent = '📁 连接预设文件夹';
+          webFsRestore().then(function (ready) {
+            if (ready) {
+              el.presetConnect.textContent = '✅ 已连接预设文件夹（点击重新授权）';
+              refreshPresets();
+            }
+          });
+          el.presetConnect.addEventListener('click', function () {
+            const go = function () {
+              window.showDirectoryPicker({ mode: 'readwrite', id: 'miyo-presets' }).then(function (h) {
+                WEB_FS.handle = h;
+                return idbMode('readwrite', (st) => st.put(h, 'presetsDir')).then(function () {
+                  return webFsRequest();
+                }).then(function () {
+                  el.presetConnect.textContent = '✅ 已连接预设文件夹';
+                  setStatus('已连接预设文件夹——预设将保存/读取于所选文件夹（建议选 exe 旁的 packs\\settings）');
+                  refreshPresets();
+                });
+              }).catch(function (e) {
+                if (e && e.name === 'AbortError') { setStatus('已取消连接', false); return; }
+                setStatus('连接失败：' + (e && e.message || e), true);
+              });
+            };
+            if (WEB_FS.handle && !WEB_FS.ready) webFsRequest().then(go).catch(function (e) { setStatus((e && e.message) || '未授权', true); });
+            else go();
+          });
+        }
+      }
+    }
+
+    editVer = cfg.mode || 'v2';
+    curMode = (DEF[editVer].modes[0] || ['idle'])[0];
+    sync();
+    buildMap();
+    buildGallery();
+    paintHourly();
+    buildReminders();
+    loadHistory();
+    setInterval(loadHistory, 5000);
+    refreshPresets();
+
+    /* 内置台词对照（单一真源 = 桌宠页上报）；拿不到就稍后重试一次 */
+    if (window.petHost && typeof window.petHost.getBuiltins === 'function') {
+      var fetchBuiltins = function () {
+        window.petHost.getBuiltins().then(function (b) {
+          if (b && b.states) { BUILTINS = b; renderBuiltins(); }
+        }).catch(function () {});
+      };
+      fetchBuiltins();
+      setTimeout(fetchBuiltins, 4000);
+    }
+  }
+
+  /* 0.3.18 网页端（导出副本用浏览器直接打开）：localStorage 后端的 petHost 兼容层
+     —— 配置与预设自洽保存/读取（与桌宠窗口的 %APPDATA% 配置相互独立） */
+  var WEB_MODE = false;
+  var WEB_VERSION = '__WEB_VERSION__';
+  /* 0.3.19：网页导出副本 = 差分专用浏览页（__WEB_ONLY__ 导出时注入 'true'） */
+  var WEB_ONLY = '__WEB_ONLY__' === 'true';
+  /* 0.3.19：网页导出副本 = 差分专用浏览页（__WEB_ONLY__ 导出时注入 'true'） */
+  var WEB_ASSETS = null;      // 探测到的差分资源基址（null = 探测失败，图库降级提示）
+  var WEB_VOICE = null;       // voice 基址（packs/voice）
+  if (!(window.petHost && typeof window.petHost.getConfig === 'function')) {
+    WEB_MODE = true;
+    const LSK = { cfg: 'miyo-web-cfg', pre: 'miyo-web-presets' };
+    function lsGet(k, d) {
+      try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; }
+    }
+    function lsSet(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+    function lsPresets() { const a = lsGet(LSK.pre, []); return Array.isArray(a) ? a : []; }
+    function sanitizeName(n) { return String(n || '').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40); }
+    window.petHost = {
+      getConfig: function () { return Promise.resolve(lsGet(LSK.cfg, {})); },
+      saveConfig: function (c) {
+        try { lsSet(LSK.cfg, c); return Promise.resolve({ ok: true }); }
+        catch (e) { return Promise.resolve({ ok: false, error: '保存失败（浏览器存储不足？）' }); }
+      },
+      resetConfig: function () { localStorage.removeItem(LSK.cfg); return Promise.resolve({ ok: true }); },
+      getAppVersion: function () {
+        return Promise.resolve(WEB_VERSION === '__WEB_VERSION__' ? '（导出副本·未注入版本）' : WEB_VERSION + '（网页端）');
+      },
+      getBuiltins: function () { return Promise.resolve({ states: {}, reacts: {} }); },
+      getHistory: function () { return Promise.resolve([]); },
+      historyStats: function () { return Promise.resolve({ lines: 0, bytes: 0 }); },
+      openHistory: function () { setStatus('网页端不支持打开历史文件（宿主窗口内可用）', true); },
+      packsList: function () { return Promise.resolve(null); },
+      playChime: function () { setStatus('网页端不支持整点试播（宿主窗口内可用）', true); },
+      testExpr: function () { setStatus('网页端不支持表达式测试（宿主窗口内可用）', true); return Promise.resolve(false); },
+      presetsList: function () { return webFsReady() ? webFsList() : Promise.resolve(lsPresets()); },
+      presetsSave: function (p) { return webFsReady() ? webFsSave(p) : lsSavePreset(p); },
+      presetsLoad: function (name) { return webFsReady() ? webFsLoad(name) : Promise.resolve(lsLoadPreset(name)); },
+      presetsDelete: function (name) { return webFsReady() ? webFsDelete(name) : lsDeletePreset(name); },
+      presetsOpen: function () { setStatus(webFsReady() ? '预设文件夹已连接（packs/settings）' : '网页端预设暂存于浏览器 localStorage；点「连接预设文件夹」可改为 packs/settings', false); },
+    };
+  }
+
+  /* 0.3.18 网页端预设文件夹：File System Access API（Chromium）
+     —— 老师授权一次 packs/settings 后，预设读写直接落在该文件夹的真实 .json
+     （与桌宠窗口的预设目录互通）；未连接时回退 localStorage；API 不可用也回退 */
+  var WEB_FS = { handle: null, ready: false, supported: typeof window.showDirectoryPicker === 'function' };
+  function idbMode(mode, fn) {
+    return new Promise(function (resolve, reject) {
+      const rq = indexedDB.open('miyo-web-fs', 1);
+      rq.onupgradeneeded = function () { rq.result.createObjectStore('k'); };
+      rq.onerror = function () { reject(rq.error); };
+      rq.onsuccess = function () {
+        const tx = rq.result.transaction('k', mode);
+        const st = tx.objectStore('k');
+        const out = fn(st);
+        tx.oncomplete = function () { resolve(out && 'result' in out ? out.result : undefined); };
+        tx.onerror = function () { reject(tx.error); };
+      };
+    });
+  }
+  function webFsRestore() {
+    if (!WEB_FS.supported) return Promise.resolve(false);
+    return idbMode('readonly', (st) => st.get('presetsDir')).then(function (h) {
+      if (!h) return false;
+      WEB_FS.handle = h;
+      return h.queryPermission({ mode: 'readwrite' }).then(function (st) {
+        WEB_FS.ready = (st === 'granted');
+        return WEB_FS.ready;
+      }).catch(function () { return false; });
+    }).catch(function () { return false; });
+  }
+  function webFsRequest() {
+    if (!WEB_FS.handle) return Promise.reject(new Error('尚未连接预设文件夹'));
+    return WEB_FS.handle.requestPermission({ mode: 'readwrite' }).then(function (st) {
+      WEB_FS.ready = (st === 'granted');
+      if (!WEB_FS.ready) throw new Error('未授予读写权限');
+      return true;
+    });
+  }
+  function webFsReady() { return WEB_FS.ready && WEB_FS.handle; }
+  function webFsList() {
+    const out = [];
+    return new Promise(function (resolve, reject) {
+      const it = WEB_FS.handle.values();
+      (function step() {
+        it.next().then(function (r) {
+          if (r.done) { out.sort((a, b) => (b.mtime || 0) - (a.mtime || 0)); return resolve(out); }
+          if (!r.value || r.value.kind !== 'file' || !/\.json$/i.test(r.value.name)) { step(); return; }
+          r.value.getFile().then(function (f) {
+            try {
+              const j = JSON.parse(f.text ? 'x' : 'x');
+            } catch (e0) { /* noop */ }
+            f.text().then(function (txt) {
+              try {
+                const j = JSON.parse(txt);
+                out.push({ file: r.value.name.slice(0, -5), name: j.presetName || r.value.name.slice(0, -5), mtime: f.lastModified });
+              } catch (e1) { /* 非法 json 跳过 */ }
+              step();
+            }).catch(function () { step(); });
+          }).catch(function () { step(); });
+        }).catch(function (e) { reject(e); });
+      })();
+    });
+  }
+  function webFsSave(p) {
+    const name = sanitizeName(p && p.name);
+    if (!name) return Promise.resolve({ ok: false, error: '预设名不能为空，且不能包含 \\ / : * ? " < > |' });
+    return WEB_FS.handle.getFileHandle(name + '.json', { create: true }).then(function (fh) {
+      return fh.createWritable().then(function (w) {
+        return w.write(JSON.stringify(Object.assign({}, p.cfg, { presetName: name }), null, 2)).then(function () { return w.close(); });
+      });
+    }).then(function () { return { ok: true }; })
+      .catch(function (e) { return Promise.resolve({ ok: false, error: '写入预设文件夹失败：' + (e && e.message || e) }); });
+  }
+  function webFsLoad(name) {
+    return WEB_FS.handle.getFileHandle(name + '.json').then(function (fh) {
+      return fh.getFile().then(function (f) { return f.text(); });
+    }).then(function (txt) { return JSON.parse(txt); })
+      .catch(function () { return null; });
+  }
+  function webFsDelete(name) {
+    return WEB_FS.handle.removeEntry(name + '.json').then(function () { return { ok: true }; })
+      .catch(function (e) { return { ok: false, error: '删除失败：' + (e && e.message || e) }; });
+  }
+  /* localStorage 回退（未连接文件夹时） */
+  function lsSavePreset(p) {
+    const name = sanitizeName(p && p.name);
+    if (!name) return Promise.resolve({ ok: false, error: '预设名不能为空，且不能包含 \\ / : * ? " < > |' });
+    const list = lsPresets().filter((x) => x.file !== name);
+    list.push({ file: name, name: name, mtime: Date.now(), cfg: Object.assign({}, p.cfg, { presetName: name }) });
+    try { lsSet(LSK.pre, list); return Promise.resolve({ ok: true }); }
+    catch (e) { return Promise.resolve({ ok: false, error: '保存失败（浏览器存储不足？）' }); }
+  }
+  function lsLoadPreset(name) {
+    const hit = lsPresets().find((x) => x.file === name);
+    return Promise.resolve(hit ? hit.cfg : null);
+  }
+  function lsDeletePreset(name) {
+    try { lsSet(LSK.pre, lsPresets().filter((x) => x.file !== name)); return Promise.resolve({ ok: true }); }
+    catch (e) { return Promise.resolve({ ok: false, error: e.message }); }
+  }
+
+  if (window.petHost && typeof window.petHost.getConfig === 'function') {
+    window.petHost.getConfig().then(boot).catch(function (e) {
+      setStatus('读取配置失败：' + e.message, true);
+    });
+  } else {
+    setStatus('未在宿主环境打开，无法读写配置', true);
+  }
+})();
+</script>
+</body>
+</html>
