@@ -44,7 +44,7 @@
 | AG-01 | AC-04、AC-05 | 来源独立启停，关闭后 watcher / timer 释放且不 emit；反复开关不重复注册 | T4 | 未执行 |
 | AG-02 | AC-02、AC-05 | 无来源、来源异常、任务失败分开；未知数量隐藏；切换来源不重放完成 | T4 | 未执行 |
 | CX-01 | AC-06 | 桌面端真实开始 / 运行 / 完成 / 中断 / 失败，记录版本和源事件 | T1 / T5 | 未执行 |
-| CX-02 | AC-06 | 桌面批准 / 输入等待及恢复；不通过桌宠执行批准 | T1 / T5 | 未执行 |
+| CX-02 | AC-06 | 桌面批准 / 输入等待及恢复；不通过桌宠执行批准 | 后续 | 当前入口不支持；用户批准首版排除，界面必须说明 |
 | CX-03 | AC-07 | 重复、半行、乱序、旧 turn / request、重放与多会话不串状态；完成只提示一次 | T5 | 未执行 |
 | CX-04 | AC-04、AC-07 | 禁用、断连、桌宠 / Codex 重启；事件收到至 UI ≤5 秒，长待机不误判断连 | T5 / T6 | 未执行 |
 | CX-05 | AC-06、AC-14 | 桥仅落盘白名单元数据；恶意 sessionId 不越界；已有 hooks 可恢复 | T5 | 未执行 |
@@ -63,19 +63,27 @@ AC-01～AC-14 全部映射到上表；“原测试通过”不能替代对应新
 
 ## 4. Codex 桌面事件映射记录
 
-T1 完成后填入真实结果；下表列的是要证明的动作，不是已存在的原生事件名。
+T1 已核对当前 Windows 桌面本地文件与同版本官方源码。下表区分真实观察与源码证明，不能把后者当成桌面动作已实测。
 
 | 桌面动作 | 桌宠自有 kind | 源入口 / 原生事件 / 必要字段 | 当前证据 |
 | --- | --- | --- | --- |
-| 提交后开始工作 | turn_started | 尚未验证 | 无 |
-| 正常完成 | turn_completed | 尚未验证 | 无 |
-| 用户中断 | turn_interrupted | 尚未验证 | 无 |
-| 回合失败 | turn_failed | 尚未验证 | 无 |
-| 请求批准 / 解决 | approval_requested / approval_resolved | 尚未验证 | 无 |
-| 请求输入 / 解决 | input_requested / input_resolved | 尚未验证 | 无 |
-| 会话结束 | session_closed | 尚未验证；无该信号时记录可行的健康状态恢复方式 | 无 |
+| 提交后开始工作 | turn_started | rollout event_msg/task_started；turn_id、timestamp、ordinal | 指定桌面聊天观察到 3 次 start |
+| 正常完成 | turn_completed | task_complete；turn_id、error 缺失/null | 同一桌面聊天观察到 2 次 complete |
+| 用户中断 | turn_interrupted | turn_aborted；可选 turn_id、受控 reason | 同版本源码持久化；本线程未实测 |
+| 回合失败 | turn_failed | task_complete.error 非空 | 同版本源码确认；本线程未实测 |
+| 请求批准 / 解决 | 不支持 | 请求事件不持久化，hooks 配对也不完整 | 用户确认首版后续补齐 |
+| 请求输入 / 解决 | 不支持 | 请求事件不持久化 | 用户确认首版后续补齐 |
+| 会话结束 | 不支持 | shutdown_complete 不持久化 | 不从无事件推测关闭 |
 
 无法获得某项时记录操作复现、缺失原因、受影响验收项、备选方案及评审决定；不能填入推测的 hooks 名称后标通过。
+
+### 2026-10-15：T1 只读调查与范围评审
+
+本机 Windows MSIX 应用版本 `26.1007.9446.0`，Electron 包版本 `26.1007.71326`，实际内嵌 CLI `0.162.0-alpha.17.2`。桌面启动的 App Server 通过内部 stdio 工作；未启动独立服务替代当前桌面。调查未注册 hooks、未修改信任或用户配置。
+
+只核查用户授权的当前桌面聊天文件，输出字段限于事件种类、ID、时间、ordinal 和 error 是否非空；没有保存标题、工作目录、提示词、回复或工具参数。meta.id 对应当前 root，source=vscode、thread_source=user、history_mode=paginated，无 parent；source=vscode 本身不能证明是桌面。已见 start ordinal 1/257/449、complete 255/446，证明真实桌面入口及正常生命周期；不证明失败 / 中断已实际触发。
+
+依据为与实际 CLI 完全一致的 [rust-v0.162.0-alpha.17.2 持久化策略](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/rollout/src/policy.rs#L127)、[事件定义](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/protocol/src/protocol.rs#L2133)、[失败终态写入](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/core/src/tasks/mod.rs#L814)。中断、失败分支后续先作合成回归，真实桌面操作仍分别记录。用户已批准首版等待信号不支持；设置 / UI 须明确说明。此阶段未运行产品新适配器，尚不能声称端到端完成。
 
 ## 5. 支持矩阵
 

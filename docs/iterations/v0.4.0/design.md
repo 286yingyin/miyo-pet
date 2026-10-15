@@ -33,7 +33,7 @@
 ```mermaid
 flowchart LR
     W[WorkBuddy 本地数据] --> WA[WorkBuddy adapter]
-    C[Codex 桌面端已验证的事件入口] --> CB[最小事件桥]
+    C[Codex 桌面端已验证的事件入口] --> CB[白名单 rollout 解析]
     CB --> CA[Codex adapter]
     WA --> H[Agent hub：选择来源与投影]
     CA --> H
@@ -48,9 +48,9 @@ flowchart LR
 | --- | --- |
 | `scripts/agents/schema.js` | 归一事件 / 快照验证与展示投影 |
 | `scripts/agents/workbuddy.js` | 包装既有 state-core，标记可用性，保留任务数量语义 |
-| `scripts/agents/codex.js` | 消费最小事件、维护回合与等待状态、去重和重放恢复 |
+| `scripts/agents/codex.js` | 消费最小事件、维护已验证生命周期、去重和重放恢复 |
 | `scripts/agents/hub.js` | 来源选择、启停、快照分发；不解释原始 Agent 文件 |
-| `scripts/codex-event.js` | 已验证桌面接口的最小状态桥；仅保存允许的元数据 |
+| `scripts/codex-event.js` | rollout 白名单解析器；仅输出允许的元数据，不另存对话 |
 | `electron/platform-paths.js` | 内置只读目录、外部可写目录、标准 file URL |
 | `electron/character-packs.js` | 包发现、兼容旧布局、清单验证与当前角色回退 |
 | `electron/config-store.js` | schema 迁移、备份与原子写入、角色配置隔离 |
@@ -76,6 +76,7 @@ completionKey: string | null
 observedAt: number                 本机接收时间，毫秒
 rev: number                        hub 对外统一分配，本次桌宠进程内单调递增
 reason: string | null              稳定原因码，不含原始错误正文
+capabilities: { lifecycle, waitingApproval, waitingInput, sessionClosed }
 ```
 
 - `null` 代表来源未提供数量；不能把一个正在运行的回合解释成若干任务。Codex 只显示状态，未证明存在的任务数胶囊隐藏。
@@ -102,43 +103,39 @@ reason: string | null              稳定原因码，不含原始错误正文
 
 WorkBuddy 的 pending 继续表示真实待办任务，仍使用原有 pending 状态。来源故障与任务失败不能都投影成旧 `error: true`。
 
-### 4.3 Codex 桌面端先做技术验证
+### 4.3 Codex 桌面入口与支持边界
 
-本版最先完成一个限时技术验证，不先写完整适配器：
+2026-10-15 已核对 Windows 桌面应用 `26.1007.9446.0`，内嵌 CLI `0.162.0-alpha.17.2`。当前 Windows 桌面 App Server 使用内部 stdio，另启服务不能订阅现有桌面聊天。hooks 的 Stop 不是可靠终态，也缺少完整等待请求 / 解决配对，因此首版改为只读本地 rollout。用户明确批准首版支持可靠生命周期，批准 / 输入等待后续补齐。
 
-1. 记录实际 Codex 桌面版本、平台和可用官方接口；从桌面发起真实回合。
-2. 验证官方 hooks 是否由该桌面版本触发、如何注册及信任；分别记录开始、结束、中断、失败、等待批准 / 输入和恢复的真实最小样本。
-3. 若使用 App Server，必须证明能观察用户**已经在使用的桌面会话**。另起 `codex app-server` 后控制自己新建的会话，不能证明覆盖当前桌面应用。
-4. 把“桌面动作 → 真实源事件 → 必要字段 → 归一状态”表和脱敏证据写入本版验证文档。无可用入口或缺少关键事件时先评审缺口，不能默默换成 CLI、进程存活检测或私有数据库猜测。
+兼容门槛采用已核对 CLI 版本白名单，未知版本给出不支持说明，不按近似格式猜测。该入口是公开源码的文件实现，不是官方稳定订阅 API。当前桌面真实文件 source 为 vscode，不能据此区分桌面和 VS Code 扩展；通过用户填写的桌面聊天 ID 显式绑定，只按文件名定位对应 ID，核对 session_meta.id，不遍历其他聊天正文。提供 codexHome（默认用户目录下 .codex）与 threadId 两项全局配置；不读取认证文件。
 
-首选官方 hooks + 本地最小事件桥；App Server 是有条件备选，不是已证实的全局监听器。两者都不满足时，本版 Codex 目标保持未达成，其余可独立任务仍可开发。
+| 源事件 | 最小字段 | phase | 能力 |
+| --- | --- | --- | --- |
+| event_msg / task_started（或 turn_started 别名） | turn_id | running | 生命周期 |
+| event_msg / task_complete（或 turn_complete 别名） | turn_id、error 是否非空 | completed / failed | 生命周期 |
+| event_msg / turn_aborted | turn_id、受控 reason | interrupted | 生命周期 |
+| 审批 / 输入等待、会话关闭 | 当前不持久化 | 不推测 | unsupported |
 
-参考：[官方 hooks](https://developers.openai.com/codex/hooks)、[官方 App Server](https://developers.openai.com/codex/app-server)。文档入口不是桌面支持证明，具体支持以该版本实测为准。
+Codex counts 全为 null；capabilities 为 lifecycle:true、waitingApproval:false、waitingInput:false、sessionClosed:false。running 表示回合开始后尚未观察到终态，界面说明“回合进行中，无法细分等待”，不能暗示持续生成。
 
-### 4.4 事件桥与顺序
+依据为与本机一致的官方标签：[持久化策略](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/rollout/src/policy.rs#L127)、[生命周期字段](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/protocol/src/protocol.rs#L2133)、[失败写入](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/core/src/tasks/mod.rs#L814)。[官方 hooks 文档](https://learn.chatgpt.com/docs/hooks#common-input-fields)也说明 transcript 格式不是稳定 API。
 
-在入口验证后实现 `scripts/codex-event.js`。读取宿主传入的事件，立即丢弃提示词、回复、工具参数和路径等非必要字段；只允许输出：
+### 4.4 rollout 读取、恢复与最小状态协议
+
+scripts/codex-event.js 提供纯解析接口。源文件包含对话，只在主进程侧解析，仅将生命周期白名单字段输出到 adapter，其他字段立即丢弃；禁止转发、记录日志或另存原文。失败仅取 error 非空标志，不输出错误正文。自有最小事件为：
 
 ```text
 { schemaVersion:1, provider:"codex", sessionId, turnId,
-  kind, requestId:null|string, eventId, sourceTime:null|number,
-  sourceSequence:null|number, streamId:null|string, observedAt }
-kind = turn_started | turn_completed | turn_interrupted | turn_failed |
-       approval_requested | approval_resolved | input_requested | input_resolved |
-       session_closed
+  kind, eventId, sourceTime, sourceSequence, streamId, observedAt }
+kind = turn_started | turn_completed | turn_interrupted | turn_failed
 ```
 
-这是桌宠自有协议，不是声称 Codex 原生存在同名事件。每个 kind 必须有技术验证中真实源事件映射；未覆盖项不能由时间猜出。
-
-- 事件写入用户数据目录的 `agent-events/codex/`；桥采用每事件独立文件，同目录临时文件写完再 rename，以免并发 hooks 交错追加或轮转破坏游标。文件名使用事件 ID 的摘要，不直接拼接会话 ID；适配器只读已提交文件。兼容测试覆盖截断文件，不把半文件当有效事件。
-- `eventId` 优先从源 ID 取得；没有源 ID 时按稳定字段构造去重键，不用每次随机 ID 让重放变成新事件。
-- 不能假设异步 hooks 到达顺序就是事件发生顺序。按 session / turn 隔离，终态不能被同一 turn 的晚到开始事件逆转；不同 requestId 分别配对，旧 turn 不能清除新 turn 等待。
-- 若源有序号使用源序号；否则保留终态优先和请求配对，无法无歧义排序的情况输出 unknown，并写明诊断原因。
-- 保存已消费事件 ID、请求已解决标记和已展示完成键；resolve 先于 request 时保留 tombstone，防止晚到请求重新挂起。完成键成功持久化后才发提示，重启不重播历史完成。事件日志不是唯一当前状态源，裁剪不得移除尚需恢复的活动回合摘要；错误 / 截断保留 lastGood，不触发“全部完成”。
-- 桌宠不批准请求、不读取认证文件，也不修改 Codex 对话数据。入口配置变更应先展示修改内容并支持恢复，不覆盖用户已有 hooks；注册的信任步骤按 Codex 当前要求处理。
-- 事件目录默认本地使用、轮转保留最近 7 天、单文件上限 2 MiB；来源关闭后停止读取。无网络接收端。
-
-首版若只有多个会话事件，内部隔离后选择“最新有真实活动的会话”；当前会话正在等待用户时固定关注它，直到解决、结束或用户切换来源。不提供多会话列表；歧义时显示来源 / 会话短标识并允许重新连接，不把多个会话加成一个回合。
+- 线程身份取 meta.id，不取可由子 agent 共享的 session_id。只接受 user 根线程，排除 parent、Internal/SubAgent 对象来源与非 user 的 thread_source。异常元数据降级，不借其他聊天补齐。
+- 同文件以稳定文件身份、字节偏移及可选 ordinal 排序；时间只作展示。完整换行后推进游标，半行等待；无效行 / 异常字段降级，限制单行缓存。替换 / 截断静默重建，旧游标失效。
+- 初次读取、重启、重新启用只重建历史，不庆祝。历史 start 无终态输出 stale + unknown（上次回合状态未确认）：该版本 SuspendTurnAndShutdown 可停止回合而不写终态。监听后新 start 才确认 running。不因长时间无事件假定断连。
+- 同 turn 终态不能被晚到 start 逆转，旧 turn 终态不能覆盖较新 turn。无 turnId 的 aborted 只在唯一活动回合可配对时处理，否则 unknown。ThreadRolledBack 静默重建且不庆祝；fork 继承历史不能作为新完成。
+- eventId 按文件身份 / 偏移 / 类型稳定构造；完成键为 threadId + turnId，先原子持久化已提示键和读取摘要，再发 completionKey。摘要放 eventDir，不复制原文；持久化失败不庆祝。读失败保留 lastGood 并标记降级。
+- start / refresh / stop 遵守 4.1；关闭释放 timer / watcher，不再读文件或 emit。用户源文件只读，不注册 hooks、不修改信任状态、无网络端点。未来增加 hooks 时另行设计配对及恢复流程。
 
 ## 5. 平台与路径
 

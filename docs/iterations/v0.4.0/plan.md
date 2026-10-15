@@ -95,20 +95,19 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 - [ ] 页面显示来源和 health，来源数量未知时隐藏计数；区分 awaiting_input 与 WorkBuddy pending 文案；来源故障不进入任务失败表情。
 - [ ] 运行新增测试和原 29 项状态断言，真实 Electron 验证关闭采集后无后续状态推送、再次开启恢复、无 WorkBuddy 纯摆宠正常；记录并提交。
 
-## Task 5: T5 Codex 桌面端适配与最小事件桥
+## Task 5: T5 Codex 桌面 rollout 只读适配
 
-**前置：** T1 桌面入口与源映射已评审成立；依赖 T2 路径和 T4 契约。
+**前置：** T1 同版本入口已核对，用户批准等待后续补齐；依赖 T2 路径和 T4 契约。
 
-**文件：** 新增 `scripts/codex-event.js`、`scripts/agents/codex.js`；扩展 `tests/agents.test.js`，必要时修改 `electron/main.js` 和设置页的接入说明。注册配置示例直接纳入用户文档，不另建会话方案副本。
+**文件：** 新增 `scripts/codex-event.js`、`scripts/agents/codex.js` 与专用测试；必要时修改主进程、设置页与用户接入说明。接口遵守方案 4.3 / 4.4，白名单解析不转发正文。
 
-**接口：** 桥按方案 4.4 协议写最小元数据；adapter 实现 T4 生命周期。真实源字段只采用 T1 证明的映射；没有映射的 kind 不伪造。
-
-- [ ] 用合成事件写正常回合、失败、中断、等待批准 / 输入与恢复测试；断言 phase / health / counts / completionKey 语义准确。
-- [ ] 写重复 eventId、终态后晚到 start、旧 turn resolve、新旧 requestId 交错、半行、无效 JSON、多会话、重启游标和完成提示不重播测试。
-- [ ] 写事件桥字段白名单测试：给定含 prompt / reply / tool arguments 的输入，落盘不得含相应内容；会话 ID 包含分隔符时不能写出 eventDir。
-- [ ] 运行 `node --test tests/agents.test.js` 确认预期失败；按已验证入口实现桥、游标、轮转及接入状态提示，不修改批准决策。
-- [ ] 在真实 Codex **桌面端**重做 T1 场景，量测从事件接收到画面更新 ≤5 秒；验证禁用、桌宠重启和用户已有 hooks 可恢复。仅 CLI 成功不勾选本项。
-- [ ] 记录平台 / 桌面版本 / 支持缺口 / 脱敏证据，执行全套自动检查，提交本任务。
+- [ ] 先写正常回合、error 非空失败、中断、nullable counts、能力声明、不支持版本测试，确认 RED 再实现。
+- [ ] 写半行 / 无效 JSON / 行缓存上限、重复终态、终态后晚到 start、旧 turn、无 ID 中断、线程身份、结构化子 agent 排除测试。
+- [ ] 写重启 / 重新启用旧 start 为 stale unknown、历史完成不重播、持久化失败不庆祝、截断 / 替换 / rollback / fork 历史恢复测试。
+- [ ] 按线程 ID 文件名查找并核实元数据；只读用户源文件。游标和完成摘要写入 T2 eventDir。含 prompt / reply / tool arguments 的合成原始行证明白名单没有泄漏。
+- [ ] 设置页提供 Codex 目录 / 桌面聊天 ID、版本与能力说明；未知数量隐藏，运行文案明确无法细分等待。全局来源设置不可归入角色。
+- [ ] 在真实当前 Codex 桌面聊天核对读取和画面；记录观察到的状态及事件收到至 UI 时延。未触发的桌面失败 / 中断单列，不用合成测试冒充实测；禁用与重启通过 Electron 回归。
+- [ ] 执行新增及现有检查，记录支持版本、实测限制，提交本任务。
 
 ## Task 6: T6 原生 Mac 启动、产物与桌面 UI 验证
 
