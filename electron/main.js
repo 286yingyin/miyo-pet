@@ -431,16 +431,19 @@ async function publishConfig(candidate) {
 function submitConfig(request, targetId) {
   return enqueueConfig(async () => {
     try {
-      let candidate = store.applyPatch(configV2, request);
+      // Internal actions bind to the committed state when their queue entry runs.
+      // Renderer requests remain explicit snapshots and must pass the stale check.
+      const currentRequest = typeof request === 'function' ? request() : request;
+      let candidate = store.applyPatch(configV2, currentRequest);
       if (targetId) {
         const pack = packRegistry.find(p => p.id === targetId);
         if (!pack) throw Object.assign(new Error('角色包不可用'), { code: 'PACK_UNAVAILABLE' });
         candidate = store.switchCharacter(candidate, targetId);
         const mode = store.getCharacterConfig(candidate, targetId, roleDefaults(targetId)).display.mode;
         if (!pack.modes[mode]) throw Object.assign(new Error('该角色没有此模式的素材，请切换模式'), { code: 'PACK_MODE_UNAVAILABLE' });
-      } else if (request.patch.mode) {
+      } else if (currentRequest.patch.mode) {
         const pack = packRegistry.find(p => p.id === candidate.activeCharacterId);
-        if (!pack || !pack.modes[request.patch.mode]) throw Object.assign(new Error('该角色没有此模式的素材'), { code: 'PACK_MODE_UNAVAILABLE' });
+        if (!pack || !pack.modes[currentRequest.patch.mode]) throw Object.assign(new Error('该角色没有此模式的素材'), { code: 'PACK_MODE_UNAVAILABLE' });
       }
       if (targetId) {
         const pack = packRegistry.find(p => p.id === targetId);
@@ -453,7 +456,8 @@ function submitConfig(request, targetId) {
   });
 }
 function saveConfig(patch) {
-  return submitConfig({ characterId: cfg.characterId, baseRevision: cfg.revision, patch });
+  const requestedPatch = JSON.parse(JSON.stringify(patch));
+  return submitConfig(() => ({ characterId: cfg.characterId, baseRevision: cfg.revision, patch: requestedPatch }));
 }
 
 /* =======================================================

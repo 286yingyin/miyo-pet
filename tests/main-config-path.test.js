@@ -32,7 +32,7 @@ function mainConfig(platform, userData, override) {
     __dirname: path.dirname(mainFile)
   });
   vm.runInContext(fs.readFileSync(mainFile, 'utf8') + '\n' +
-    'tick = function () {}; globalThis.configFixture = { read: loadConfig, write(value) { return saveConfig(value); } };', context, { filename: mainFile });
+    'tick = function () {}; globalThis.configFixture = { read: loadConfig, write(value) { return saveConfig(value); }, submit(request) { return submitConfig(request); }, clickTop(checked) { petMenuTemplate().find(item => item.label === \'始终置顶\').click({ checked }); return configQueue; } };', context, { filename: mainFile });
   return context.configFixture;
 }
 
@@ -67,3 +67,48 @@ for (const platform of ['darwin', 'win32']) {
     }
   });
 }
+
+
+test('queued internal actions bind revision at execution while renderer requests remain stale', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'miyo-config-queue-'));
+  try {
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(file, JSON.stringify({ _v: 1, alwaysOnTop: true, scope: 'current' }));
+    const config = mainConfig('win32', dir, file);
+    const original = await config.read();
+    const results = await Promise.all([
+      config.write({ alwaysOnTop: false }),
+      config.write({ scope: 'all' }),
+      config.submit({ characterId: original.characterId, baseRevision: original.revision, patch: { volume: 0.9 } })
+    ]);
+    assert.equal(results[0].ok, true);
+    assert.equal(results[1].ok, true, 'the second queued menu action must not be silently dropped');
+    assert.equal(results[2].ok, false);
+    assert.equal(results[2].error, 'CONFIG_STALE', 'renderer-supplied revisions must still be enforced');
+    const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(stored.global.alwaysOnTop, false);
+    assert.equal(stored.global.scope, 'all');
+    assert.equal(stored.revision, original.revision + 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('two queued native checkbox actions restore the original value', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'miyo-checkbox-queue-'));
+  try {
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(file, JSON.stringify({ _v: 1, alwaysOnTop: true }));
+    const config = mainConfig('win32', dir, file);
+    const original = await config.read();
+    const results = await Promise.all([config.clickTop(false), config.clickTop(true)]);
+    assert.equal(results[0].ok, true);
+    assert.equal(results[1].ok, true);
+    const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(stored.global.alwaysOnTop, true);
+    assert.equal(stored.revision, original.revision + 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
