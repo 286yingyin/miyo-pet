@@ -152,6 +152,7 @@ const SKIP = new Set(['spine-webgl.js', 'render.html', 'preview.html', 'ix-test.
   fs.mkdirSync(dst, { recursive: true });
   fs.readdirSync(src, { withFileTypes: true }).forEach((e) => {
     if (SKIP.has(e.name)) return;
+    if (e.isDirectory() && e.name === 'packs') return;   // 0.3.23：其他学生差分包不入分发产物
     const s = path.join(src, e.name), d = path.join(dst, e.name);
     if (e.isDirectory()) copyDir(s, d);
     else fs.copyFileSync(s, d);
