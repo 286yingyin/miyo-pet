@@ -179,7 +179,8 @@ function defaults() {
 }
 
 function configFile() {
-  return process.env.MIYO_CONFIG || path.join(platformPaths.configDir, 'config.json');
+  /* Mac config stays under userData even if a legacy per-file override is set. */
+  return (process.platform !== 'darwin' && process.env.MIYO_CONFIG) || path.join(platformPaths.configDir, 'config.json');
 }
 
 let cfg = null;
