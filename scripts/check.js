@@ -613,6 +613,8 @@ checkModule('scripts/task-status.js', [
   ['保留旧导出', /module\.exports[\s\S]*snapshot/]
 ]);
 
+checkModule('electron/platform-paths.js', []);
+
 checkModule('electron/paths.js', [
   ['应用根解析 appRoot', /function appRoot/],
   ['兼容 app-root / 目录版两种布局', /app-root/]

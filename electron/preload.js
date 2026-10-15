@@ -30,6 +30,7 @@
  *   onChime(cb)           接收整点播报 { hour, lines[], sprs[], voice, ms }
  *   playChime(payload)    试播一次（设置页用）
  *   speak(payload)        语音通道（预留：主进程当前只记日志，不播放）
+ *   fileUrlOf(path)       绝对路径转标准 file URL（纯转换，不读写文件）
  *
  * 页面在存在 window.petHost 时会自动切到「只显示桌宠」的宿主模式。
  * ---------------------------------------------------------------------------
@@ -93,6 +94,8 @@ contextBridge.exposeInMainWorld('petHost', {
   presetsDelete(name) { return ipcRenderer.invoke('presets-delete', name); },
   presetsOpen() { ipcRenderer.send('presets-open'); },
 
+  /* Pure path -> URL conversion; no file reads or directory access. */
+  fileUrlOf(file) { return ipcRenderer.sendSync('file-url', file); },
   /* 语音通道（预留）：现在主进程只记日志，不做播放 */
   speak(payload) { ipcRenderer.send('pet-speak', payload || {}); }
 });

@@ -132,10 +132,10 @@ if (fs.existsSync(locDir)) {
 fs.mkdirSync(path.join(APP, 'electron'), { recursive: true });
 fs.mkdirSync(path.join(APP, 'scripts'), { recursive: true });
 
-['main.js', 'preload.js', 'paths.js', 'icon.png'].forEach((f) => {
+['main.js', 'preload.js', 'paths.js', 'platform-paths.js', 'icon.png'].forEach((f) => {
   fs.copyFileSync(path.join(ROOT, 'electron', f), path.join(APP, 'electron', f));
 });
-log('已放入 electron/（main.js / preload.js / paths.js / icon.png）');
+log('已放入 electron/（main.js / preload.js / paths.js / platform-paths.js / icon.png）');
 
 /* 状态链路所需的脚本一个都不能少 */
 ['task-status.js', 'state-core.js', 'approval-status.js', 'change-log.js', 'credits-query.js'].forEach((f) => {

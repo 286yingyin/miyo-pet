@@ -50,6 +50,15 @@ try {
   console.log('[miyo-pet] userData 设置失败 ' + e.message);
 }
 
+const platformPaths = paths.resolvePaths({
+  platform: process.platform,
+  userDataDir: app.getPath('userData'),
+  appRoot: paths.appRoot(),
+  portableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+  exeDir: path.dirname(app.getPath('exe')),
+  isPackaged: app.isPackaged
+});
+
 /* 窗口尺寸按「显示模式」区分：
    —— v1 是 948×948 的正方形半身差分，桌面基准宽 300px；必须给它更宽更矮的窗口，
       否则 300px 的桌宠塞进 240px 宽的窗口会被横向裁掉（这就是「半身显示不全」的根因）。
@@ -170,7 +179,7 @@ function defaults() {
 }
 
 function configFile() {
-  return process.env.MIYO_CONFIG || path.join(app.getPath('userData'), 'config.json');
+  return process.env.MIYO_CONFIG || path.join(platformPaths.configDir, 'config.json');
 }
 
 let cfg = null;
@@ -198,17 +207,10 @@ function clampNum(v, lo, hi, def) {
    ①便携版：PORTABLE_EXECUTABLE_DIR（electron-builder portable 解压后指向 exe 所在目录）；
    ②绿色版：exe 同目录。都找不到（dev）→ 只剩内置。 */
 function packsRootDirs() {
-  var roots = [];
-  try {
-    if (process.env.PORTABLE_EXECUTABLE_DIR) roots.push(path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'packs'));
-  } catch (e0) { /* ignore */ }
-  try {
-    if (app.isPackaged) roots.push(path.join(path.dirname(app.getPath('exe')), 'packs'));
-  } catch (e1) { /* ignore */ }
-  return roots.filter((r, i) => r && roots.indexOf(r) === i);
+  return platformPaths.packRoots.slice();
 }
 function fileUrlOfDir(d) {
-  try { return encodeURI('file:///' + String(d).replace(/\\/g, '/')) + '/'; }
+  try { return paths.fileUrlOfDir(d); }
   catch (e) { return ''; }
 }
 /* 差分系列包的候选目录（0.3.5）：外部根 packs/<ver>/<名>（可多个）→
@@ -244,7 +246,7 @@ function walkPackPngs(dir, urls, depth) {
     if (!m) return;
     const id = extractSpriteId(m[1]);
     if (!urls[id]) {
-      try { urls[id] = fileUrlOfDir(path.dirname(full)) + encodeURI(e.name); } catch (eU) { /* ignore */ }
+      try { urls[id] = paths.fileUrlOf(full); } catch (eU) { /* ignore */ }
     }
   });
 }
@@ -386,7 +388,7 @@ function normalizeConfig() {
   /* 差分系列（0.3.3 统一）：cfg.series = 单一系列名（v1/v2 共用同一学生）。
      'miyo' = 默认；其他 = packs/<ver>/<名>/（exe 同目录 packs 优先，见 packsBaseOf）。 */
   if (!isSafePackName(cfg.series)) cfg.series = 'miyo';
-  /* 0.3.5：取消每学生倍率，缩放范围已放宽到 0.5–2.5 */
+  /* 统一宿主 / 页面缩放范围：0.5–5。 */
   /* 0.3.3 系列包差分清单 + 外部 packs 根（exe 同目录优先）：
      packIds[ver] = 该学生实际拥有的差分编号（'miyo' → 空 = 用内置清单）；
      packsRootUrl 传给页面拼 file:// 路径。 */
@@ -422,7 +424,7 @@ function normalizeConfig() {
         if (!/\.ogg$/i.test(f)) return;
         const base = f.replace(/\.ogg$/i, '');
         let u = '';
-        try { u = fileUrlOfDir(d) + encodeURI(f); } catch (eU) { return; }
+        try { u = paths.fileUrlOf(path.join(d, f)); } catch (eU) { return; }
         if (!voiceMap[base]) voiceMap[base] = u;
         if (!voiceMap[f]) voiceMap[f] = u;
       });
@@ -1054,11 +1056,7 @@ function sanitizePresetName(name) {
    便携版用 PORTABLE_EXECUTABLE_DIR；dev 用 appRoot/presets。
    legacyPresetsDir() = 旧 userData/presets（只读兼容：列表合并、载入回退） */
 function presetsDir() {
-  try {
-    if (process.env.PORTABLE_EXECUTABLE_DIR) return path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'packs', 'settings');
-    if (app.isPackaged) return path.join(path.dirname(app.getPath('exe')), 'packs', 'settings');
-  } catch (e0) { /* ignore */ }
-  return path.join(paths.appRoot(), 'presets');
+  return platformPaths.presetDir;
 }
 function legacyPresetsDir() { return path.join(app.getPath('userData'), 'presets'); }
 
@@ -1120,6 +1118,16 @@ ipcMain.on('presets-open', function () {
 });
 
 ipcMain.handle('config-get', function () { return cfg; });
+
+/* Pure URL conversion only: sandboxed preload has no Node pathToFileURL.
+   Synchronous reply keeps audio selection ordered; this handler performs no I/O. */
+ipcMain.on('file-url', function (event, file) {
+  let url = '';
+  if (typeof file === 'string' && path.isAbsolute(file)) {
+    try { url = paths.fileUrlOf(file); } catch (e) { /* invalid path */ }
+  }
+  event.returnValue = url;
+});
 
 /* 差分系列包清单（0.3.2）：扫 prototype/<ver>/packs/<目录>/，label 读 manifest.json */
 ipcMain.handle('packs-list', function () {

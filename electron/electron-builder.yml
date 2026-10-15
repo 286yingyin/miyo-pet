@@ -26,6 +26,7 @@ files:
   - main.js
   - preload.js
   - paths.js
+  - platform-paths.js
   - icon.png
   - package.json
 

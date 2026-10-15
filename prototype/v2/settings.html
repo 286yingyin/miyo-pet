@@ -1028,8 +1028,12 @@
   function voiceUrl(p) {
     p = String(p || '').trim();
     if (!p) return '';
-    if (/^file:/i.test(p)) return encodeURI(p);
-    if (/^[a-zA-Z]:[\\/]/.test(p)) return 'file:///' + encodeURI(p.replace(/\\/g, '/'));
+    if (/^file:/i.test(p)) return p;
+    if (/^[a-zA-Z]:[\\/]/.test(p) || /^\//.test(p)) {
+      if (window.petHost && typeof window.petHost.fileUrlOf === 'function') {
+        return window.petHost.fileUrlOf(p);
+      }
+    }
     /* 0.3.13：纯文件名 → voice 文件夹映射（packs/voice 优先，免后缀，仅 ogg） */
     if (!/[\\/]/.test(p)) {
       const vm = cfg.voiceMap;
@@ -1040,9 +1044,9 @@
         if (vm[base]) return vm[base];
       }
       const vr = cfg.voiceRootUrl;
-      if (vr) return vr + encodeURI(p);
+      if (vr) return vr + encodeURIComponent(p);
       /* 0.3.18 网页端：探测到的 voice 基址（导出副本旁 packs/voice 或同级 voice） */
-      if (WEB_VOICE) return WEB_VOICE + encodeURI(p);
+      if (WEB_VOICE) return WEB_VOICE + encodeURIComponent(p);
     }
     try { return new URL(p, location.href).href; } catch (e) { return p; }
   }

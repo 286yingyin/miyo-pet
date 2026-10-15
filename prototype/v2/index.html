@@ -1263,8 +1263,12 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   function voiceSrc(p) {
     p = String(p || '').trim();
     if (!p) return '';
-    if (/^file:/i.test(p)) return encodeURI(p);
-    if (/^[a-zA-Z]:[\\/]/.test(p)) return 'file:///' + encodeURI(p.replace(/\\/g, '/'));
+    if (/^file:/i.test(p)) return p;
+    if (/^[a-zA-Z]:[\\/]/.test(p) || /^\//.test(p)) {
+      if (window.petHost && typeof window.petHost.fileUrlOf === 'function') {
+        return window.petHost.fileUrlOf(p);
+      }
+    }
     /* 0.3.13：纯文件名 → voice 文件夹映射（packs/voice 优先，免后缀，仅 ogg）；
        未命中映射时回退 voiceRootUrl 拼接 */
     if (!/[\\/]/.test(p)) {
@@ -1276,7 +1280,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
         if (vm[base]) return vm[base];
       }
       const vr = lastCfg.voiceRootUrl;
-      if (vr) return vr + encodeURI(p);
+      if (vr) return vr + encodeURIComponent(p);
     }
     try { return new URL(p, location.href).href; } catch (e) { return p; }
   }
@@ -2136,7 +2140,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   function applyConfig(cfg) {
     lastCfg = cfg || {};
     if (!cfg || typeof cfg !== 'object') return;
-    if (typeof cfg.scale === 'number' && cfg.scale >= 0.4 && cfg.scale <= 2.5) {
+    if (typeof cfg.scale === 'number' && cfg.scale >= 0.5 && cfg.scale <= 5) {
       /* 0.3.9：--pet-scale 直接用 cfg.scale（窗口允许超出屏幕，底部锚定，
          超大尺寸时上半身出屏 = 10× 的预期行为） */
       document.documentElement.style.setProperty('--pet-scale', String(cfg.scale || 1));
