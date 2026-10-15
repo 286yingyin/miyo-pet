@@ -8,7 +8,7 @@
 
 - 上游为公开仓库 [`286yingyin/miyo-pet`](https://github.com/286yingyin/miyo-pet)，默认分支 `main`，允许 fork，仓库自身不是 fork。
 - 当前连接账号为 `whitebluepants`；对上游 `pull: true`、`push: false`，没有直接推送权限。当前是“能读，不能直接写”，并非无法访问仓库。
-- 本地 `origin` 指向上述上游。尚未建立本次开发的个人 fork，也未改动 remote 或推送内容；查询 `whitebluepants/miyo-pet` 返回 404。
+- 已创建个人 fork [`whitebluepants/miyo-pet`](https://github.com/whitebluepants/miyo-pet)。本地 `origin` 已指向个人 fork，`upstream` 指向原仓库；开发分支为 `codex/v0.4.0`，在 Codex 管理的独立 worktree 中实施。
 - `electron/package.json` 仍使用旧所有者 `2867977208lhb-tech` 的地址；该地址查询解析至同一仓库 ID。规范化地址应作为后续独立元数据修改，本次不混入产品变更。
 
 **推荐采用个人 fork → 功能分支 → 上游 PR。** 只需能写自己的 fork，就能向公开上游提 PR；不必先取得上游写权限。合并仍由上游维护者决定，fork 开发本身不改变上游内容。参见 [GitHub：从 fork 创建 PR](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-a-pull-request-from-a-fork)。
@@ -21,7 +21,7 @@
 
 ## 2. fork 开发流程
 
-以下是待执行流程，不代表已经创建 fork 或 PR。
+以下是可复用流程。本次 fork 和 remote 配置已完成，PR 状态以实际提交记录为准；不要重复执行 remote rename。
 
 1. 在 GitHub 上游页面点击 **Fork**，在自己的账号下建立仓库；以后核对实际 fork URL，不凭模板推断它已经存在。
 2. 对当前已克隆目录，先检查 `git status --short`、`git remote -v`，保留未提交修改。当前 `origin` 是上游；确认尚无 `upstream` 后执行下面的 remote 调整。
@@ -65,7 +65,7 @@ Superpowers 是开发流程辅助，不另建一套项目事实：
 - `writing-plans` 的 plan = 本版 `plan.md`。
 - 执行、代码评审和验证的必要结论追加到 `verification.md` 或方案决策表，不为每次工具调用开新文件。
 - 两个技能都明确允许用户保存位置覆盖默认目录，因此不创建 `docs/superpowers/` 镜像，也不使用日期前缀反复生成同题文件。
-- 路径可替换，需求澄清、方案评审、计划评审和如实验收仍保留。用户这次要求先一并整理文档，因此需求、方案、计划和验证先形成一套待评审草案；不把草案存在视为开发已获评审通过。
+- 路径可替换，需求澄清、方案评审、计划评审和如实验收仍保留。2026-10-15 用户先要求建立文档，随后明确批准按方案开发并与子代理审查；批准来源记录在本版文档，不能单凭文件存在自动视为获批。
 - 文档写中文；必要技术标识保留英文；技能要求的计划头可以保留在 `plan.md`，无需单独文件。
 
 `docs/AGENTS.md` 固化上述规则，避免未来 AI 再次按默认路径生成重复文件。本规范不更改本机插件或安装目录，其他仓库不受影响。
