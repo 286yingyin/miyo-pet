@@ -9,7 +9,7 @@
 | [完整需求池与版本路线](requirements/roadmap.md) | 收齐需求、记录优先级、版本候选与验收方向 |
 | [v0.4.0 需求](iterations/v0.4.0/requirements.md) | 第一版的范围、明确排除项、交付标准 |
 | [v0.4.0 技术方案](iterations/v0.4.0/design.md) | 模块边界、数据契约、兼容与迁移、技术风险 |
-| [v0.4.0 开发计划](iterations/v0.4.0/plan.md) | 分阶段实施、依赖、检查点与建议 PR 划分 |
+| [v0.4.0 开发计划](iterations/v0.4.0/plan.md) | 分阶段实施、当前进度与开发交接清单 |
 | [v0.4.0 测试与验证](iterations/v0.4.0/verification.md) | 基线证据、测试矩阵、待执行的验收及发布结论 |
 | [协作与文档规范](contributing/workflow.md) | fork / PR 流程、权限说明、Superpowers 文档落位 |
 
@@ -35,6 +35,6 @@ docs/
 ## 文档状态
 
 - 需求池中的需求已收录；版本归属除第一版已选范围外均为建议。
-- v0.4.0 文档于 2026-10-15 建立，用户已批准开发，子代理预审后进入实施。先交付 Windows 验证版，Mac 实机由用户后续补验。
+- v0.4.0 于 2026-10-15 转为 WIP 开发交接：T2～T5 已通过任务评审，T6 待修复和评审，T7 未执行；接手分支为个人 fork 的 `codex/v0.4.0`。最新测试与已知缺陷见验证记录，Mac 实机由用户后续补验。
 - `verification.md` 明确区分已执行的现状调研与未来的功能验收，不能把测试计划当作通过记录。
 - 方案、计划直接在上述正式文件维护；不再为 Superpowers、会话或每次小修改生成重复文档。完整规则见[协作与文档规范](contributing/workflow.md)。
