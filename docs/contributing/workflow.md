@@ -9,7 +9,7 @@
 - 上游为公开仓库 [`286yingyin/miyo-pet`](https://github.com/286yingyin/miyo-pet)，默认分支 `main`，允许 fork，仓库自身不是 fork。
 - 当前连接账号为 `whitebluepants`；对上游 `pull: true`、`push: false`，没有直接推送权限。当前是“能读，不能直接写”，并非无法访问仓库。
 - 已创建个人 fork [`whitebluepants/miyo-pet`](https://github.com/whitebluepants/miyo-pet)。本地 `origin` 已指向个人 fork，`upstream` 指向原仓库；开发分支为 `codex/v0.4.0`，在 Codex 管理的独立 worktree 中实施。
-- `electron/package.json` 仍使用旧所有者 `2867977208lhb-tech` 的地址；该地址查询解析至同一仓库 ID。规范化地址应作为后续独立元数据修改，本次不混入产品变更。
+- 上游随后新增 `develop` 协作分支，并将 `electron/package.json` 的 repository / homepage 更新为 `286yingyin`；本功能分支已同步这些修改。`main` 为稳定分支，当前贡献 PR 目标为 `develop`。
 
 **推荐采用个人 fork → 功能分支 → 上游 PR。** 只需能写自己的 fork，就能向公开上游提 PR；不必先取得上游写权限。合并仍由上游维护者决定，fork 开发本身不改变上游内容。参见 [GitHub：从 fork 创建 PR](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-a-pull-request-from-a-fork)。
 
@@ -38,7 +38,7 @@ git switch -c codex/docs-v0.4.0
 
 3. 仅暂存本次相关文件，检查 diff，完成本地提交。文档阶段只提交文档；不夹带本地配置、素材、日志、构建产物。
 4. `git push -u origin <branch>` 推到自己的 fork。
-5. 创建 PR：**base = `286yingyin/miyo-pet:main`；head = 个人 fork 的功能分支**。标题和说明包含实际变化、验证、未覆盖环境。可以先发草稿 PR 对齐方向。
+5. 创建 PR：**base = `286yingyin/miyo-pet:develop`；head = `whitebluepants/miyo-pet:codex/v0.4.0`**。标题和说明包含实际变化、验证、未覆盖环境。可以先发草稿 PR 对齐方向。
 6. 维护者评审后修改同一个分支，再推送即可更新 PR。需要同步上游时，先检查工作区并 `git fetch upstream`；个人未共享分支可以 rebase，共享分支优先 merge，避免改写他人提交。
 7. 上游合并后更新本地基线，再创建下一条功能分支，保持 PR 可单独评审和回退。
 

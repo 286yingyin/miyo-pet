@@ -6,9 +6,9 @@
   "author": "miyo-pet contributors",
   "repository": {
     "type": "git",
-    "url": "https://github.com/2867977208lhb-tech/miyo-pet.git"
+    "url": "https://github.com/286yingyin/miyo-pet.git"
   },
-  "homepage": "https://github.com/2867977208lhb-tech/miyo-pet#readme",
+  "homepage": "https://github.com/286yingyin/miyo-pet#readme",
   "description": "美代桌宠 · 透明置顶桌面壳（Electron）。加载 prototype/v2 的完整立绘版桌宠，主进程直接读取 WorkBuddy 任务目录。",
   "main": "main.js",
   "scripts": {
