@@ -716,6 +716,31 @@
   };
 
   var cfg = null;              // 当前编辑中的配置
+  var switchGeneration = 0, saveQueue = Promise.resolve();
+  function adoptConfig(value) {
+    cfg = value; editVer = cfg.mode || 'v2';
+    gBrowse.v1 = cfg.series; gBrowse.v2 = cfg.series;
+    sync(); buildMap(); buildGallery(); paintHourly(); buildReminders(); buildReacts();
+  }
+  function saveCurrent() {
+    const owner = cfg, generation = switchGeneration;
+    const patch = JSON.parse(JSON.stringify(cfg));
+    const task = saveQueue.catch(function () {}).then(function () {
+      if (owner !== cfg || generation !== switchGeneration) throw new Error('角色已切换，请重新保存');
+      if (!cfg.characterId) return window.petHost.saveConfig(patch);
+      return window.petHost.saveConfig({ characterId: owner.characterId, baseRevision: owner.revision, patch: patch });
+    }).then(function (result) {
+      if (result && result.ok === false) {
+        if (result.error === 'CONFIG_STALE' && result.config && owner === cfg) adoptConfig(result.config);
+        throw new Error(result.error === 'CONFIG_STALE' ? '配置已变化，已重新载入，请重新编辑' : result.error || '保存失败');
+      }
+      if (owner === cfg && result && result.config) owner.revision = result.config.revision;
+      if (owner !== cfg || generation !== switchGeneration) throw new Error('角色已切换，忽略旧保存回调');
+      return result;
+    });
+    saveQueue = task; return task;
+  }
+
   var editVer = 'v2';          // 正在编辑哪一套映射
   var curMode = 'idle';        // 图库要追加到哪个状态
   var selHour = new Date().getHours();
@@ -838,7 +863,7 @@
      'miyo'（无 packIds）走内置美代清单 —— 图库 / 差分下拉 / 台本差分随学生切换。 */
   function namesOf() {
     var p = cfg.packIds && cfg.packIds[editVer];
-    return (p && p.length) ? p : DEF[editVer].names;
+    return cfg.characterId && cfg.characterId !== 'miyo' ? (p || []) : (p && p.length) ? p : DEF[editVer].names;
   }
   function idsOf(mode) {
     var m = cfg.mapping[editVer] || (cfg.mapping[editVer] = {});
@@ -909,7 +934,7 @@
           /* 未配置任何台本 → 预览台本0（默认轮播的具体化） */
           payload.script = JSON.parse(JSON.stringify(defaultScriptSeed(mode)));
         }
-        window.petHost.saveConfig(cfg).then(function () {
+        saveCurrent().then(function () {
           window.petHost.testExpr(payload);
           setStatus('已发送测试预览（请看桌宠；点「回归平常」结束）');
         }).catch(function (e) { setStatus('测试失败：' + e.message, true); });
@@ -1107,11 +1132,11 @@
             }
           } else chosen = list[0];
         } else {
-          var b = (BUILTINS && BUILTINS.reactScripts && BUILTINS.reactScripts[rk.kind]) || [];
+          var b = (!(cfg.characterId && cfg.characterId !== 'miyo') && BUILTINS && BUILTINS.reactScripts && BUILTINS.reactScripts[rk.kind]) || [];
           chosen = b.length ? b[Math.floor(Math.random() * b.length)] : null;
         }
         if (!chosen) { setStatus('该动作没有可用台本', true); return; }
-        window.petHost.saveConfig(cfg).then(function () {
+        saveCurrent().then(function () {
           window.petHost.testExpr({ script: JSON.parse(JSON.stringify(chosen)) });
           setStatus('已发送测试预览（请看桌宠；点「回归平常」结束）');
         }).catch(function (e) { setStatus('测试失败：' + e.message, true); });
@@ -1145,6 +1170,7 @@
   /* 内置台词对照（单一真源 = 桌宠页上报） */
   function renderBuiltins() {
     if (!el.builtinBox) return;
+    if (cfg.characterId && cfg.characterId !== 'miyo') { el.builtinBox.textContent = '当前角色未提供内置台词对照'; return; }
     if (!BUILTINS) {
       el.builtinBox.textContent = '（等待桌宠页上报内置台词……若一直为空，请先启动桌宠主窗口）';
       return;
@@ -1199,7 +1225,7 @@
   /* 台本0 的默认内容：默认（或自定义后）的差分映射 → 每张一行、空台词、7 秒一换 */
   function defaultScriptSeed(mode) {
     var m = (cfg.mapping && cfg.mapping[editVer] && cfg.mapping[editVer][mode]) ||
-            (DEF[editVer].defaultMapping && DEF[editVer].defaultMapping[mode]) || [];
+            (cfg.characterId && cfg.characterId !== 'miyo' ? namesOf().slice(0, 1) : DEF[editVer].defaultMapping && DEF[editVer].defaultMapping[mode]) || [];
     return { def: 1, weight: 1, voice: '',
       lines: m.map(function (spr) { return { text: '', spr: spr, sec: 7 }; }) };
   }
@@ -1720,12 +1746,21 @@
         applyBtn.className = 'btn sm primary';
         applyBtn.textContent = '应用';
         applyBtn.addEventListener('click', function () {
-          if (!confirm('应用预设「' + p.name + '」会覆盖当前全部设置，确定吗？')) return;
+          if (!confirm('应用预设「' + p.name + '」将切换到预设声明的角色并应用设置，确定吗？')) return;
+          if (window.petHost.presetsApply) {
+            const generation = ++switchGeneration;
+            window.petHost.presetsApply({ name: p.file, characterId: cfg.characterId, baseRevision: cfg.revision, patch: cfg }).then(function (result) {
+              if (generation !== switchGeneration) return;
+              if (!result.ok) { if (result.error === 'CONFIG_STALE' && result.config) adoptConfig(result.config); throw new Error(result.error); }
+              adoptConfig(result.config); setStatus('已应用预设');
+            }).catch(function (e) { setStatus('应用失败：' + e.message, true); });
+            return;
+          }
           window.petHost.presetsLoad(p.file).then(function (loaded) {
             if (!loaded) { setStatus('读取预设失败', true); return; }
             delete loaded.presetName;
             cfg = loaded;
-            window.petHost.saveConfig(cfg).then(function () {
+            saveCurrent().then(function () {
               cfg.pillVisible = cfg.pillVisible || {};
               cfg.bubble = cfg.bubble || {};
               editVer = (cfg.mode === 'v1' || cfg.mode === 'v2') ? cfg.mode : 'v2';
@@ -1838,7 +1873,8 @@
     var srcG = gallerySource();
     if (srcG.urls) {
       if (srcG.urls[id]) return srcG.urls[id];
-      if (srcG.urls['00']) return srcG.urls['00'];
+      const fallback = srcG.urls[cfg.packDefaultId && cfg.packDefaultId[editVer]] || srcG.urls[Object.keys(srcG.urls).sort()[0]];
+      return fallback || '';
     }
     /* 0.3.23：预览大图用 full 原图（full 参数），缩略用 low 副本 */
     return (full && editVer === 'v2') ? DEF.v2.fileFull(id) : DEF[editVer].file(id);
@@ -1863,6 +1899,7 @@
     var pack = gPackList[editVer] && gPackList[editVer].find(function (p) { return p.dir === gBrowse[editVer]; });
     /* 0.3.7：files = 编号 → 实际文件名映射（兼容原始 *_spr_XX 命名） */
     if (pack && pack.ids && pack.ids.length && pack.urls) return { ids: pack.ids, urls: pack.urls };
+    if (cfg.characterId && cfg.characterId !== 'miyo' && (!gBrowse[editVer] || gBrowse[editVer] === cfg.characterId)) return { ids: namesOf(), urls: cfg.packFileUrl[editVer] || {} };
     return { ids: namesOf(), urls: null };
   }
   var __galKey = '';
@@ -2213,7 +2250,9 @@
       fillSeries(el.serSel, null, cur);
       return;
     }
+    var generation = switchGeneration;
     window.petHost.packsList().then(function (list) {
+      if (generation !== switchGeneration) return;
       gPackList = list || { v1: [], v2: [] };
       /* v1/v2 清单合并：同名系列 = 同一学生（v1+v2 各一半） */
       var order = [], map = {};
@@ -2244,6 +2283,7 @@
       var note = document.getElementById('serNote');
       if (note && window.petHost && typeof window.petHost.getConfig === 'function') {
         window.petHost.getConfig().then(function (c) {
+          if (c && c.configError) { note.textContent = '当前角色缺少此模式素材，请选择其他模式或角色。'; return; }
           if (c && c.packsRoot) {
             note.innerHTML = '当前外部差分目录：<b>' + String(c.packsRoot)
               + '</b>（内含 v1/、v2/ 子目录，系列文件夹放里面）。'
@@ -2253,9 +2293,24 @@
       }
     }).catch(function () { fillSeries(el.serSel, null, cur); });
   }
+  var switchQueue = Promise.resolve();
   el.serSel.addEventListener('change', function () {
     if (!cfg) return;
-    cfg.series = el.serSel.value || 'miyo';
+    if (!window.petHost.switchCharacter) { cfg.series = el.serSel.value || 'miyo'; return; }
+    const target = el.serSel.value, generation = ++switchGeneration;
+    switchQueue = switchQueue.catch(function () {}).then(async function () {
+      // Drain any earlier save before binding this switch to the committed revision.
+      await saveQueue.catch(function () {});
+      const source = cfg;
+      const result = await window.petHost.switchCharacter({ characterId: source.characterId, baseRevision: source.revision,
+        targetId: target, patch: JSON.parse(JSON.stringify(source)) });
+      if (!result.ok) { if (result.error === 'CONFIG_STALE' && result.config) cfg = result.config; throw new Error(result.error); }
+      cfg = result.config;
+      if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+      if (generation === switchGeneration) { adoptConfig(result.config); setStatus('已切换角色'); }
+    }).catch(function (e) {
+      if (generation === switchGeneration) { adoptConfig(cfg); setStatus('切换失败：' + e.message, true); }
+    });
   });
   el.gSerSel.addEventListener('change', function () {
     gBrowse[editVer] = el.gSerSel.value || 'miyo';
@@ -2431,7 +2486,7 @@
       setStatus('非宿主环境，无法试播', true);
       return;
     }
-    window.petHost.saveConfig(cfg).then(function () {
+    saveCurrent().then(function () {
       window.petHost.playChime({
         hour: selHour,
         scripts: JSON.parse(JSON.stringify(o.scripts || []))
@@ -2670,13 +2725,14 @@
        旧 cfg 里的对象；换成新对象后这些编辑器全部脱钩，第二次起的所有修改
        都写进了孤儿对象（「首次生效、再改无效；应用预设重绑后又生效一次」的根因）。
        规范化的值（钳制/迁移）主进程自己会落盘并推给桌宠，本地无需采纳。 */
-    window.petHost.saveConfig(cfg).then(function () {
+    saveCurrent().then(function () {
       setStatus('已保存并生效');
     }).catch(function (e) { setStatus('保存失败：' + e.message, true); });
   });
 
   el.reset.addEventListener('click', function () {
-    window.petHost.resetConfig().then(function (r) {
+    window.petHost.resetConfig({ characterId: cfg.characterId, baseRevision: cfg.revision }).then(function (r) {
+      if (r && r.ok === false) { if (r.error === 'CONFIG_STALE' && r.config) adoptConfig(r.config); throw new Error(r.error); }
       if (r && r.config) {
         cfg = r.config; editVer = cfg.mode; curMode = (DEF[editVer].modes[0] || ['idle'])[0];
         sync(); buildMap(); buildGallery(); paintHourly();
@@ -2739,7 +2795,7 @@
     el.bubF.value = String(cfg.bubble.fontScale);
     el.bubFVal.textContent = Number(cfg.bubble.fontScale).toFixed(2) + '×';
     /* 气泡外观回填（0.3.1）：缺省走默认值 */
-    if (!cfg.bubble.name) cfg.bubble.name = '美代';
+    if (!cfg.bubble.name) cfg.bubble.name = cfg.characterLabel || '美代';
     if (typeof cfg.bubble.scale !== 'number') cfg.bubble.scale = 1;
     if (typeof cfg.bubble.nameScale !== 'number') cfg.bubble.nameScale = 1;
     if (typeof cfg.bubble.bgOpacity !== 'number') cfg.bubble.bgOpacity = 1;
@@ -2903,6 +2959,7 @@
       }
     }
 
+    if (cfg.characterId) { gBrowse.v1 = cfg.characterId; gBrowse.v2 = cfg.characterId; }
     editVer = cfg.mode || 'v2';
     curMode = (DEF[editVer].modes[0] || ['idle'])[0];
     sync();

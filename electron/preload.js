@@ -10,8 +10,8 @@
  *   getState()            主动读一次当前快照（Promise）
  *   onConfig(cb)          接收配置（映射 / 大小 / 置顶 / 版本 / 统计范围）
  *   getConfig()           读当前配置（Promise）
- *   saveConfig(cfg)       写配置（Promise）
- *   resetConfig()         恢复默认（Promise）
+ *   saveConfig(request)   按 characterId/baseRevision/patch 保存（Promise）
+ *   resetConfig(request)  按 characterId/baseRevision 恢复当前角色默认（Promise）
  *
  *   — 界面 —
  *   move(dx, dy)          拖动桌宠时移动窗口（增量，主进程按屏幕坐标累计）
@@ -53,7 +53,8 @@ contextBridge.exposeInMainWorld('petHost', {
   onConfig(cb) { on('miyo-config', cb); },
   getConfig() { return ipcRenderer.invoke('config-get'); },
   saveConfig(cfg) { return ipcRenderer.invoke('config-save', cfg); },
-  resetConfig() { return ipcRenderer.invoke('config-reset'); },
+  resetConfig(request) { return ipcRenderer.invoke('config-reset', request); },
+  switchCharacter(request) { return ipcRenderer.invoke('character-switch', request); },
   /* 应用版本（0.2.10）：设置页核对「跑的是哪个包」用 */
   getAppVersion() { return ipcRenderer.invoke('app-version'); },
 
@@ -90,6 +91,7 @@ contextBridge.exposeInMainWorld('petHost', {
   /* 设置预设：userData/presets/<名字>.json，整套 cfg */
   presetsList() { return ipcRenderer.invoke('presets-list'); },
   presetsSave(p) { return ipcRenderer.invoke('presets-save', p || {}); },
+  presetsApply(request) { return ipcRenderer.invoke('presets-apply', request); },
   presetsLoad(name) { return ipcRenderer.invoke('presets-load', name); },
   presetsDelete(name) { return ipcRenderer.invoke('presets-delete', name); },
   presetsOpen() { ipcRenderer.send('presets-open'); },

@@ -27,6 +27,8 @@ files:
   - preload.js
   - paths.js
   - platform-paths.js
+  - character-packs.js
+  - config-store.js
   - icon.png
   - package.json
 

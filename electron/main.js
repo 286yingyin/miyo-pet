@@ -18,11 +18,13 @@
  */
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, shell, powerMonitor } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, shell, powerMonitor, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const paths = require('./paths');
+const packs = require('./character-packs');
+const store = require('./config-store');
 const core = require(paths.stateCore());
 const changeLog = require(paths.changeLog());
 
@@ -214,50 +216,6 @@ function fileUrlOfDir(d) {
   try { return paths.fileUrlOfDir(d); }
   catch (e) { return ''; }
 }
-/* 差分系列包的候选目录（0.3.5）：外部根 packs/<ver>/<名>（可多个）→
-   应用内 prototype/<ver>/packs/<名>（内置）。'miyo' 走内置默认素材，不扫。 */
-/* 0.3.8：系列目录名放行中文（老师按学生名建文件夹是自然习惯），
-   只挡路径穿越/非法字符：\ / : * ? " < > |、..、首尾空白 */
-function isSafePackName(n) {
-  if (typeof n !== 'string' || !n || n !== n.trim() || n.length > 60) return false;
-  if (/[\\/:*?"<>|]/.test(n) || n.indexOf('..') >= 0) return false;
-  return true;
-}
-/* 0.3.9 统一深度扫描：系列可能放在
-   ① packs/<ver>/<名>/（标准）② packs/<名>/（根级，png 直放或内含 v1/v2 子目录）
-   ③ 多层嵌套（zip 解压产生的包裹目录）—— 一律递归收集 png（深度 ≤3）。
-   返回 { ids: [编号], urls: {编号: 完整 file:// URL} }；无 png = null。 */
-/* 0.3.7：原始命名兼容 —— NP0083_spr_00.png → 编号 00；00.png → 00 */
-function extractSpriteId(baseName) {
-  const m = /(?:^|_)spr_(.+)$/i.exec(baseName);
-  return m ? m[1] : baseName;
-}
-function walkPackPngs(dir, urls, depth) {
-  if (depth > 3) return;
-  let entries;
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
-  entries.forEach((e) => {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) {
-      walkPackPngs(full, urls, depth + 1);
-      return;
-    }
-    /* 0.3.10：差分图片支持 png/jpg/jpeg（老师的 kayako 包是 jpg） */
-    const m = /^(.+)\.(?:png|jpe?g)$/i.exec(e.name);
-    if (!m) return;
-    const id = extractSpriteId(m[1]);
-    if (!urls[id]) {
-      try { urls[id] = paths.fileUrlOf(full); } catch (eU) { /* ignore */ }
-    }
-  });
-}
-function packPngCount(dir) {
-  const urls = {};
-  walkPackPngs(dir, urls, 0);
-  return Object.keys(urls).length;
-}
-/* zip 自动解压：packs 下的 *.zip（root/v1/v2 各层）→ 同名目录（系统 tar，支持 zip）。
-   已有同名目录则跳过；解压失败静默（下轮 normalize 再试）。 */
 function extractExternalZips(root) {
   [root, path.join(root, 'v1'), path.join(root, 'v2')].forEach(function (base) {
     let zips = [];
@@ -268,72 +226,11 @@ function extractExternalZips(root) {
       const outDir = path.join(base, name);
       try {
         if (fs.existsSync(outDir)) return;
-        require('child_process').execSync('tar -xf "' + zPath + '" -C "' + outDir + '"', { stdio: 'ignore', timeout: 300000 });
+        fs.mkdirSync(outDir, { recursive: true });
+        require('child_process').execFileSync('tar', ['-xf', zPath, '-C', outDir], { stdio: 'ignore', timeout: 300000 });
       } catch (e) { /* 解压失败忽略 */ }
     });
   });
-}
-/* 外部系列注册表：{ 名: { v1: 目录|null, v2: 目录|null } }。
-   候选：每个根的 <ver>/<名>（标准）与根级 <名>（内含 v1/v2 子目录则按版本，
-   否则视为 v1/v2 通用）。 */
-function scanExternalPacks() {
-  const reg = {};
-  function register(ver, dir, name) {
-    if (!reg[name]) reg[name] = { v1: null, v2: null };
-    if (!reg[name][ver]) reg[name][ver] = dir;
-  }
-  packsRootDirs().forEach(function (root) {
-    extractExternalZips(root);
-    ['v1', 'v2'].forEach(function (ver) {
-      let dirs = [];
-      try { dirs = fs.readdirSync(path.join(root, ver)); } catch (e) { return; }
-      dirs.forEach(function (d) {
-        if (!isSafePackName(d)) return;
-        const p = path.join(root, ver, d);
-        try { if (!fs.statSync(p).isDirectory()) return; } catch (e2) { return; }
-        register(ver, p, d);
-      });
-    });
-    let rootDirs = [];
-    try { rootDirs = fs.readdirSync(root); } catch (e) { return; }
-    rootDirs.forEach(function (d) {
-      if (!isSafePackName(d) || d === 'v1' || d === 'v2') return;
-      const p = path.join(root, d);
-      try { if (!fs.statSync(p).isDirectory()) return; } catch (e2) { return; }
-      const hasV1 = fs.existsSync(path.join(p, 'v1'));
-      const hasV2 = fs.existsSync(path.join(p, 'v2'));
-      if (hasV1) register('v1', path.join(p, 'v1'), d);
-      if (hasV2) register('v2', path.join(p, 'v2'), d);
-      if (!hasV1 && !hasV2) { register('v1', p, d); register('v2', p, d); }
-    });
-  });
-  return reg;
-}
-function packBaseDirs(ver, name) {
-  if (name === 'miyo' || !isSafePackName(name)) return [];
-  const ext = scanExternalPacks()[name];
-  const dirs = [];
-  if (ext && ext[ver]) dirs.push(ext[ver]);
-  dirs.push(path.join(paths.appRoot(), 'prototype', ver, 'packs', name));
-  return dirs;
-}
-function packDirOf(ver, name) {
-  for (const d of packBaseDirs(ver, name)) {
-    try { if (fs.statSync(d).isDirectory() && packPngCount(d) > 0) return d; } catch (e) { /* next */ }
-  }
-  return null;
-}
-function scanPack(ver, name) {
-  for (const d of packBaseDirs(ver, name)) {
-    try {
-      if (!fs.statSync(d).isDirectory()) continue;
-      const urls = {};
-      walkPackPngs(d, urls, 0);
-      const ids = Object.keys(urls).sort();
-      if (ids.length) return { ids: ids, urls: urls };
-    } catch (e) { /* next */ }
-  }
-  return { ids: [], urls: {} };
 }
 function normalizeConfig() {
   cfg.scale = clampNum(cfg.scale, MIN_SCALE, MAX_SCALE, 1);
@@ -355,7 +252,7 @@ function normalizeConfig() {
   Object.keys(cfg.pillVisible).forEach((k) => { cfg.pillVisible[k] = cfg.pillVisible[k] !== false; });
   cfg.usage = Object.assign({ enabled: false, cacheMs: 60000, dbPath: '' }, obj(cfg.usage));
   cfg.bubble = Object.assign({ width: 196, fontScale: 1, offsetX: 0, offsetY: 0, align: 'right',
-    name: '美代', scale: 1, nameScale: 1,
+    name: cfg.characterLabel || '', scale: 1, nameScale: 1,
     bg: '#ffffff', bgOpacity: 1, borderColor: '',
     nameColor: '', textColor: '', nameFont: '', textFont: '' }, obj(cfg.bubble));
   cfg.bubble.width = clampNum(cfg.bubble.width, 120, 420, 196);
@@ -367,7 +264,7 @@ function normalizeConfig() {
   cfg.bubble.scale = clampNum(cfg.bubble.scale, 0.5, 2.5, 1);
   cfg.bubble.nameScale = clampNum(cfg.bubble.nameScale, 0.5, 2.5, 1);
   cfg.bubble.bgOpacity = clampNum(cfg.bubble.bgOpacity, 0.1, 1, 1);
-  cfg.bubble.name = String(cfg.bubble.name || '美代').trim().slice(0, 20) || '美代';
+  cfg.bubble.name = String(cfg.bubble.name || cfg.characterLabel || '').trim().slice(0, 20);
   ['bg', 'borderColor', 'nameColor', 'textColor', 'nameFont', 'textFont'].forEach((k) => {
     if (typeof cfg.bubble[k] !== 'string') { cfg.bubble[k] = ''; return; }
     cfg.bubble[k] = cfg.bubble[k].trim().slice(0, 120);
@@ -386,55 +283,36 @@ function normalizeConfig() {
   cfg.pillPos.dx = clampNum(cfg.pillPos.dx, -400, 400, 0);
   cfg.pillPos.dy = clampNum(cfg.pillPos.dy, -400, 400, 0);
   cfg.pillPos.scale = clampNum(cfg.pillPos.scale, 0.6, 1.8, 1);
-  /* 差分系列（0.3.3 统一）：cfg.series = 单一系列名（v1/v2 共用同一学生）。
-     'miyo' = 默认；其他 = packs/<ver>/<名>/（exe 同目录 packs 优先，见 packsBaseOf）。 */
-  if (!isSafePackName(cfg.series)) cfg.series = 'miyo';
-  /* 统一宿主 / 页面缩放范围：0.5–5。 */
-  /* 0.3.3 系列包差分清单 + 外部 packs 根（exe 同目录优先）：
-     packIds[ver] = 该学生实际拥有的差分编号（'miyo' → 空 = 用内置清单）；
-     packsRootUrl 传给页面拼 file:// 路径。 */
-  const pv1 = scanPack('v1', cfg.series);
-  const pv2 = scanPack('v2', cfg.series);
-  cfg.packIds = { v1: pv1.ids, v2: pv2.ids };
-  /* 0.3.9：编号 → 完整 file:// URL（递归扫描，子目录/根级包/zip 解压全支持） */
-  cfg.packFileUrl = { v1: pv1.urls, v2: pv2.urls };
-  /* 0.3.5：外部根候选 + 按版本解析出实际包目录的 file:// URL（页面拼 <id>.png 用）。
-     找不到外部包目录时 packUrl[ver] = '' → 页面回退内置 packs 相对路径。 */
-  var roots0 = packsRootDirs();
-  cfg.packsRoot = roots0[0] || '';
-  try {
-    cfg.packsRootUrl = roots0[0] ? fileUrlOfDir(roots0[0]) : '';
-  } catch (eURL) { cfg.packsRootUrl = ''; }
+  const pack = packRegistry.find(p => p.id === cfg.characterId);
+  cfg.packIds = { v1: [], v2: [] };
+  cfg.packFileUrl = { v1: {}, v2: {} };
   cfg.packUrl = { v1: '', v2: '' };
-  ['v1', 'v2'].forEach((v) => {
-    var d = packDirOf(v, cfg.series);
-    cfg.packUrl[v] = d ? fileUrlOfDir(d) : '';
-  });
-  /* 0.3.13 语音文件夹（老师指定 packs/voice）：免后缀识别 ——
-     扫描候选目录（packs/voice × 各外部根 + 包内 voice/）全部 .ogg，
-     生成「文件名(免后缀/带后缀) → 完整 file:// URL」映射；纯文件名直接命中 */
-  const voiceDirs = [];
-  packsRootDirs().forEach((r) => voiceDirs.push(path.join(r, 'voice')));
-  voiceDirs.push(path.join(paths.appRoot(), 'voice'));
+  cfg.packDefaultId = { v1: '', v2: '' };
+  for (const v of ['v1', 'v2']) {
+    const mode = pack && pack.modes[v];
+    if (!mode) continue;
+    cfg.packIds[v] = Object.keys(mode.sprites).sort();
+    cfg.packFileUrl[v] = Object.fromEntries(Object.entries(mode.sprites).map(([id, file]) => [id, paths.fileUrlOf(file)]));
+    cfg.packUrl[v] = fileUrlOfDir(mode.rootDir);
+    cfg.packDefaultId[v] = mode.defaultSpriteId;
+  }
+  cfg.configError = !pack || !pack.modes[cfg.mode] ? 'PACK_MODE_UNAVAILABLE' : null;
+  cfg.packsRoot = packsRootDirs()[0] || '';
+  cfg.packsRootUrl = cfg.packsRoot ? fileUrlOfDir(cfg.packsRoot) : '';
+  const roots = pack ? [...new Set(Object.values(pack.modes).filter(Boolean).map(m => m.rootDir))] : [];
+  const voiceDirs = roots.map(root => path.join(root, 'voice'));
+  if (cfg.characterId === 'miyo') voiceDirs.push(...packsRootDirs().map(r => path.join(r, 'voice')), path.join(paths.appRoot(), 'voice'));
   cfg.voiceDirs = voiceDirs;
-  const voiceMap = {};
-  voiceDirs.forEach((d) => {
-    try {
-      if (!fs.statSync(d).isDirectory()) return;
-      fs.readdirSync(d).forEach((f) => {
-        if (!/\.ogg$/i.test(f)) return;
-        const base = f.replace(/\.ogg$/i, '');
-        let u = '';
-        try { u = paths.fileUrlOf(path.join(d, f)); } catch (eU) { return; }
-        if (!voiceMap[base]) voiceMap[base] = u;
-        if (!voiceMap[f]) voiceMap[f] = u;
-      });
-    } catch (e) { /* next */ }
-  });
-  cfg.voiceMap = voiceMap;
-  const voiceRoot = voiceDirs.find((d) => { try { return fs.existsSync(d); } catch (e) { return false; } }) || voiceDirs[0] || '';
-  cfg.voiceRoot = voiceRoot;
-  try { cfg.voiceRootUrl = voiceRoot ? fileUrlOfDir(voiceRoot) : ''; } catch (eV) { cfg.voiceRootUrl = ''; }
+  cfg.voiceMap = {};
+  for (const dir of voiceDirs) {
+    try { for (const f of fs.readdirSync(dir)) if (/\.ogg$/i.test(f)) {
+      const url = paths.fileUrlOf(path.join(dir, f));
+      if (!cfg.voiceMap[f]) cfg.voiceMap[f] = url;
+      if (!cfg.voiceMap[f.replace(/\.ogg$/i, '')]) cfg.voiceMap[f.replace(/\.ogg$/i, '')] = url;
+    } } catch (_) { /* optional voice directory */ }
+  }
+  cfg.voiceRoot = voiceDirs.find(d => fs.existsSync(d)) || '';
+  cfg.voiceRootUrl = cfg.voiceRoot ? fileUrlOfDir(cfg.voiceRoot) : '';
   ['lines', 'voices', 'hourly', 'mapping', 'reacts', 'scripts', 'restSprs', 'idleSprs', 'idleBlink', 'idleSway', 'idleBreathe'].forEach((k) => {
     cfg[k] = obj(cfg[k]);
     cfg[k].v1 = obj(cfg[k].v1);
@@ -484,42 +362,98 @@ function normalizeConfig() {
   return cfg;
 }
 
-/* 一次性迁移：把老配置里被污染的值纠正过来，并打上版本号。
-   ⚠️ 调用方必须先判断「这是不是老配置」—— defaults() 里本来就带 _v，
-   所以合并之后再判断 `if (!cfg._v)` 永远不会成立（踩过这个坑）。 */
-function migrateConfig(c) {
-  const changes = [];
-  if (c.scope === 'all') {
-    c.scope = 'current';
-    changes.push('统计范围 all → current（历史上此值会让桌宠把别的会话的待办也算进来，与 WorkBuddy 界面不一致）');
-  }
-  if (c._v !== 1) {
-    c._v = 1;
-    changes.push('写入配置版本号 _v=1');
-  }
-  return changes;
+let configV2 = null;
+let packRegistry = [];
+let configQueue = Promise.resolve();
+let migrations = [];
+function enqueueConfig(action) {
+  const next = configQueue.catch(() => {}).then(action);
+  configQueue = next;
+  return next;
 }
-
-let migrations = [];           // 本次启动做过的一次性配置迁移，写进变化记录留痕
-
-function loadConfig() {
-  let raw = null;
-  try { raw = JSON.parse(fs.readFileSync(configFile(), 'utf8')); } catch (e) { raw = null; }
-  const isOldConfig = !raw || !raw._v;        // 老配置：文件里没有版本号
-  cfg = merge(defaults(), raw || {});
-  migrations = isOldConfig ? migrateConfig(cfg) : [];
-  return normalizeConfig();
+function legacyId(name) {
+  return (packRegistry.find(p => p.legacyNames && p.legacyNames.includes(name)) || {}).id || packs.legacyId(name || 'miyo');
 }
-
-function saveConfig() {
-  try {
-    fs.mkdirSync(path.dirname(configFile()), { recursive: true });
-    fs.writeFileSync(configFile(), JSON.stringify(cfg, null, 2), 'utf8');
-    return true;
-  } catch (e) {
-    console.log('[miyo-pet] 配置写入失败 ' + e.message);
-    return false;
+async function discoverCharacters() {
+  if (process.platform === 'win32') packsRootDirs().forEach(extractExternalZips);
+  packRegistry = await packs.discoverPacks([...packsRootDirs(), path.join(platformPaths.resourceRoot, 'packs')]);
+  // Built-in files are described once, then listed and loaded through the same registry.
+  const builtin = { id: 'miyo', label: '美代', defaults: {}, attribution: null, warnings: [], legacyNames: ['miyo'], modes: {} };
+  for (const v of ['v1', 'v2']) {
+    const root = path.join(platformPaths.resourceRoot, 'prototype', v, 'assets', v === 'v1' ? 'spr' : 'full');
+    const sprites = {};
+    try { for (const f of fs.readdirSync(root)) if (/\.png$/i.test(f)) sprites[f.replace(/\.png$/i, '').replace(/^.*_spr_/, '')] = path.join(root, f); } catch (_) {}
+    builtin.modes[v] = Object.keys(sprites).length ? { rootDir: root, sprites, defaultSpriteId: '00' } : null;
   }
+  packRegistry = [builtin, ...packRegistry.filter(p => p.id !== 'miyo')];
+}
+function roleDefaults(id) {
+  const pack = packRegistry.find(p => p.id === id);
+  const flat = defaults();
+  if (id !== 'miyo') {
+    for (const key of ['mapping','lines','voices','reacts','scripts','hourly','restSprs','idleSprs','idleBlink','idleSway','idleBreathe']) flat[key] = { v1: {}, v2: {} };
+    flat.bubble.name = pack ? pack.label : id;
+    flat.mode = pack && !pack.modes.v2 && pack.modes.v1 ? 'v1' : 'v2';
+  }
+  const base = store.split(flat).character;
+  const supplied = pack && pack.defaults || {};
+  return store.merge(store.merge(base, store.split(supplied).character), supplied.display ? { display: supplied.display } : {});
+}
+function projection(config) {
+  const id = config.activeCharacterId;
+  const globalDefaults = store.split(defaults()).global;
+  const value = store.projectConfig({ ...config, global: store.merge(globalDefaults, config.global) }, id, roleDefaults(id));
+  value.characterLabel = (packRegistry.find(p => p.id === id) || {}).label || id;
+  const previous = cfg; cfg = value;
+  try { return normalizeConfig(); } finally { cfg = previous; }
+}
+async function loadConfig() {
+  await discoverCharacters();
+  configV2 = await store.readConfig(configFile(), { resolveLegacyId: legacyId });
+  cfg = projection(configV2);
+  return cfg;
+}
+async function publishConfig(candidate) {
+  for (const [id, role] of Object.entries(candidate.characters)) {
+    const roleBase = roleDefaults(id);
+    for (const key of Object.keys(role)) if (Object.hasOwn(roleBase, key)) {
+      const remaining = store.omitDefaults(role[key], roleBase[key]);
+      if (remaining === undefined) delete role[key]; else role[key] = remaining;
+    }
+  }
+  const next = projection(candidate);
+  await store.writeConfig(configFile(), candidate);
+  configV2 = candidate; cfg = next;
+  applyWindow(); applyTop(cfg.alwaysOnTop); sendConfig(); refreshTray();
+  lastRev = -1; if (log) tick('manual', '配置已保存', true);
+  return { ok: true, config: cfg };
+}
+function submitConfig(request, targetId) {
+  return enqueueConfig(async () => {
+    try {
+      let candidate = store.applyPatch(configV2, request);
+      if (targetId) {
+        const pack = packRegistry.find(p => p.id === targetId);
+        if (!pack) throw Object.assign(new Error('角色包不可用'), { code: 'PACK_UNAVAILABLE' });
+        candidate = store.switchCharacter(candidate, targetId);
+        const mode = store.getCharacterConfig(candidate, targetId, roleDefaults(targetId)).display.mode;
+        if (!pack.modes[mode]) throw Object.assign(new Error('该角色没有此模式的素材，请切换模式'), { code: 'PACK_MODE_UNAVAILABLE' });
+      } else if (request.patch.mode) {
+        const pack = packRegistry.find(p => p.id === candidate.activeCharacterId);
+        if (!pack || !pack.modes[request.patch.mode]) throw Object.assign(new Error('该角色没有此模式的素材'), { code: 'PACK_MODE_UNAVAILABLE' });
+      }
+      if (targetId) {
+        const pack = packRegistry.find(p => p.id === targetId);
+        const mode = projection(candidate).mode;
+        try { await fs.promises.access(packs.resolveSprite(pack, mode)); }
+        catch (_) { throw Object.assign(new Error('角色素材已不可用'), { code: 'PACK_UNAVAILABLE' }); }
+      }
+      return await publishConfig(candidate);
+    } catch (e) { return { ok: false, error: e.code || 'CONFIG_WRITE_FAILED', config: cfg }; }
+  });
+}
+function saveConfig(patch) {
+  return submitConfig({ characterId: cfg.characterId, baseRevision: cfg.revision, patch });
 }
 
 /* =======================================================
@@ -727,13 +661,7 @@ function startCredits() {
 }
 
 function applyMode(mode) {
-  if (mode !== 'v1' && mode !== 'v2') return;
-  if (cfg.mode === mode) return;
-  cfg.mode = mode;
-  saveConfig();
-  sendConfig();                         // 单页双模式：页面收到配置后热切换素材/尺寸，无需换页
-  applyWindow();                        // 只重设窗口尺寸（右下锚点）
-  refreshTray();
+  if (mode === 'v1' || mode === 'v2') return saveConfig({ mode });
 }
 
 function applyTop(flag) {
@@ -775,7 +703,7 @@ function petMenuTemplate() {
       label: '始终置顶',
       type: 'checkbox',
       checked: cfg.alwaysOnTop,
-      click: function (item) { applyTop(item.checked); saveConfig(); refreshTray(); }
+      click: function (item) { saveConfig({ alwaysOnTop: item.checked }); }
     },
     { label: '打开变化记录', click: openHistory },
     { type: 'separator' },
@@ -783,13 +711,7 @@ function petMenuTemplate() {
   ];
 }
 
-function setScope(scope) {
-  cfg.scope = scope === 'all' ? 'all' : 'current';
-  saveConfig();
-  lastRev = -1;
-  tick('manual', '切换统计范围 → ' + cfg.scope, true);
-  refreshTray();
-}
+function setScope(scope) { return saveConfig({ scope: scope === 'all' ? 'all' : 'current' }); }
 
 function popupPetMenu() {
   if (!win || win.isDestroyed()) return;
@@ -826,7 +748,7 @@ function refreshTray() {
     { label: 'v2 · 全身立绘', type: 'radio', checked: cfg.mode === 'v2', click: function () { applyMode('v2'); } },
     { label: '仅当前会话', type: 'radio', checked: cfg.scope !== 'all', click: function () { setScope('current'); } },
     { label: '全部会话', type: 'radio', checked: cfg.scope === 'all', click: function () { setScope('all'); } },
-    { label: '始终置顶', type: 'checkbox', checked: cfg.alwaysOnTop, click: function (i) { applyTop(i.checked); saveConfig(); } },
+    { label: '始终置顶', type: 'checkbox', checked: cfg.alwaysOnTop, click: function (i) { saveConfig({ alwaysOnTop: i.checked }); } },
     { type: 'separator' },
     { label: '打开变化记录', click: openHistory },
     { label: '重新载入', click: function () { if (win && !win.isDestroyed()) win.reload(); } },
@@ -1021,8 +943,8 @@ ipcMain.on('pet-move', function (_e, d) {
 
 ipcMain.on('pet-menu', popupPetMenu);
 ipcMain.on('open-settings', openSettings);
-ipcMain.on('mode-set', function (_e, mode) { applyMode(mode); saveConfig(); });
-ipcMain.on('top-set', function (_e, flag) { applyTop(flag); saveConfig(); refreshTray(); });
+ipcMain.on('mode-set', function (_e, mode) { applyMode(mode); });
+ipcMain.on('top-set', function (_e, flag) { saveConfig({ alwaysOnTop: !!flag }); });
 ipcMain.on('scope-set', function (_e, scope) { setScope(scope); });
 ipcMain.on('history-open', openHistory);
 
@@ -1080,26 +1002,44 @@ ipcMain.handle('presets-list', function () {
   });
   return out.sort((a, b) => b.mtime - a.mtime);
 });
-ipcMain.handle('presets-save', function (_e, p) {
+ipcMain.handle('presets-save', async function (_e, p) {
   const name = sanitizePresetName(p && p.name);
-  if (!name) return { ok: false, error: '预设名不能为空，且不能包含 \\ / : * ? " < > |' };
-  try {
-    const dir = presetsDir();
-    fs.mkdirSync(dir, { recursive: true });
-    const data = Object.assign({}, p.cfg, { presetName: name });
-    fs.writeFileSync(path.join(dir, name + '.json'), JSON.stringify(data, null, 2));
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; }
+  if (!name) return { ok: false, error: '非法预设名' };
+  return enqueueConfig(async () => {
+    try {
+      const snapshot = store.applyPatch(configV2, { characterId: p.cfg.characterId, baseRevision: p.cfg.revision, patch: p.cfg });
+      const id = snapshot.activeCharacterId;
+      snapshot.characters = { [id]: snapshot.characters[id] };
+      snapshot.presetName = name;
+      await store.writeConfig(path.join(presetsDir(), name + '.json'), snapshot);
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.code || 'PRESET_WRITE_FAILED' }; }
+  });
 });
-ipcMain.handle('presets-load', function (_e, name) {
+async function loadPreset(name) {
   const n = sanitizePresetName(name);
   if (!n) return null;
   for (const d of [presetsDir(), legacyPresetsDir()]) {
-    try { return JSON.parse(fs.readFileSync(path.join(d, n + '.json'), 'utf8')); }
-    catch (e) { /* next */ }
+    const file = path.join(d, n + '.json');
+    if (fs.existsSync(file)) return store.readConfig(file, { resolveLegacyId: legacyId });
   }
   return null;
+}
+ipcMain.handle('presets-load', async (_e, name) => {
+  const preset = await loadPreset(name);
+  return preset ? projection(preset) : null;
 });
+ipcMain.handle('presets-apply', (_e, request) => enqueueConfig(async () => {
+  try {
+    const preset = await loadPreset(request.name);
+    if (!preset) throw new Error('PRESET_MISSING');
+    const next = store.applyPreset(configV2, preset, request);
+    const pack = packRegistry.find(p => p.id === next.activeCharacterId);
+    const projected = projection(next);
+    if (!pack || !pack.modes[projected.mode]) throw new Error('PACK_UNAVAILABLE');
+    return await publishConfig(next);
+  } catch (e) { return { ok: false, error: e.code || e.message, config: cfg }; }
+}));
 ipcMain.handle('presets-delete', function (_e, name) {
   const n = sanitizePresetName(name);
   if (!n) return { ok: false, error: '非法预设名' };
@@ -1130,40 +1070,14 @@ ipcMain.on('file-url', function (event, file) {
   event.returnValue = url;
 });
 
-/* 差分系列包清单（0.3.2）：扫 prototype/<ver>/packs/<目录>/，label 读 manifest.json */
 ipcMain.handle('packs-list', function () {
-  function scan(ver) {
-    /* 0.3.10：miyo 也带 ids/urls 字段（空 = 设置页走内置清单），避免 undefined 崩溃 */
-    var out = [{ dir: 'miyo', label: '美代（默认）', ids: [], urls: null }];
-    var seen = { miyo: 1 };
-    /* 外部根优先（便携版/绿色版都支持）—— 老师可自由增删，不必重新打包 */
-    var roots = packsRootDirs().map((r) => path.join(r, ver));
-    roots.push(path.join(paths.appRoot(), 'prototype', ver, 'packs'));
-    roots.forEach(function (root) {
-      var dirs = [];
-      try { dirs = fs.readdirSync(root).sort(); } catch (e) { return; }
-      dirs.forEach(function (d) {
-        if (!isSafePackName(d) || seen[d]) return;
-        var p = path.join(root, d);
-        try {
-          if (!fs.statSync(p).isDirectory()) return;
-          seen[d] = 1;
-          var label = d;
-          try {
-            var mf = JSON.parse(fs.readFileSync(path.join(p, 'manifest.json'), 'utf8'));
-            if (mf && mf.label) label = String(mf.label).slice(0, 30);
-          } catch (e2) { /* 无 manifest 用目录名 */ }
-          const urls = {};
-          try {
-            walkPackPngs(p, urls, 0);
-          } catch (e5) { /* ignore */ }
-          out.push({ dir: d, label: label, ids: Object.keys(urls).sort(), urls: urls });
-        } catch (e3) { /* skip */ }
-      });
-    });
-    return out;
+  const out = { v1: [], v2: [] };
+  for (const pack of packRegistry) for (const ver of ['v1', 'v2']) if (pack.modes[ver]) {
+    const mode = pack.modes[ver];
+    out[ver].push({ id: pack.id, dir: pack.id, label: pack.label, ids: Object.keys(mode.sprites).sort(),
+      urls: Object.fromEntries(Object.entries(mode.sprites).map(([id, file]) => [id, paths.fileUrlOf(file)])), warnings: pack.warnings });
   }
-  return { v1: scan('v1'), v2: scan('v2') };
+  return out;
 });
 ipcMain.handle('state-get', function () { return prevSnap; });
 /* 应用版本（0.2.10）：设置页显示，方便核对跑的是新包还是旧包 */
@@ -1171,52 +1085,30 @@ ipcMain.handle('app-version', function () { return app.getVersion(); });
 ipcMain.handle('history-tail', function (_e, n) { return log ? log.tail(n || 100) : []; });
 ipcMain.handle('history-stats', function () { return log ? log.stats() : null; });
 
-ipcMain.handle('config-save', function (_e, patch) {
-  var prevSeries = cfg.series;                 // 0.3.3：换学生检测
-  cfg = merge(defaults(), merge(cfg, patch));   // cfg 已带 _v，不再重复迁移
-  normalizeConfig();
-  /* 0.3.3 换学生：①差分映射/闲置差分清空（美代专属 id 在新学生包里不存在，
-     页面会把默认差分重置为 01）；②桌宠大小切到该学生的倍率（packScale）。 */
-  if (cfg.series !== prevSeries) {
-    ['v1', 'v2'].forEach((v) => {
-      if (cfg.mapping) cfg.mapping[v] = {};
-      if (cfg.idleSprs) cfg.idleSprs[v] = {};
-      if (cfg.restSprs) cfg.restSprs[v] = {};
-    });
-    log.append({
-      kind: 'series', source: 'config-save', scope: cfg.scope, session: null,
-      prev: prevSeries, next: cfg.series, reason: '切换差分系列（映射/闲置差分已重置，默认差分 = 01）',
-      degraded: false, errors: []
-    });
-  }
-  saveConfig();
-  applyWindow();                                // 只重设尺寸；版本/映射由页面热切换
-  applyTop(cfg.alwaysOnTop);
-  sendConfig();
-  refreshTray();
-  lastRev = -1;
-  tick('manual', '配置已保存', true);
-  return { ok: true, config: cfg };
-});
-
-ipcMain.handle('config-reset', function () {
-  cfg = defaults();
-  saveConfig();
-  applyWindow();
-  applyTop(cfg.alwaysOnTop);
-  sendConfig();
-  refreshTray();
-  lastRev = -1;
-  tick('manual', '恢复默认配置', true);
-  return { ok: true, config: cfg };
-});
+ipcMain.handle('config-save', (_e, request) => submitConfig(request));
+ipcMain.handle('character-switch', (_e, request) => submitConfig(request, request.targetId));
+ipcMain.handle('config-reset', (_e, request) => enqueueConfig(async () => {
+  try {
+    store.applyPatch(configV2, { ...request, patch: {} });
+    const next = JSON.parse(JSON.stringify(configV2));
+    next.characters[next.activeCharacterId] = {}; next.revision++;
+    return await publishConfig(next);
+  } catch (e) { return { ok: false, error: e.code || 'CONFIG_WRITE_FAILED', config: cfg }; }
+}));
 
 /* =======================================================
    启动
    ======================================================= */
-app.whenReady().then(function () {
-  loadConfig();
-  if (migrations.length || !fs.existsSync(configFile())) saveConfig();   // 迁移要落盘，否则每次启动都重来
+app.whenReady().then(async function () {
+  try { await loadConfig(); }
+  catch (e) {
+    const result = await dialog.showMessageBox({ type: 'error', title: '配置需要恢复',
+      message: '配置未被覆盖：' + (e.code || 'CONFIG_READ_FAILED'),
+      detail: '原文件及首次读取的 .bak 备份保留在配置目录。关闭桌宠后，可复制备份为 config.json 再启动。',
+      buttons: ['打开配置目录', '退出'] });
+    if (result.response === 0) await shell.openPath(path.dirname(configFile()));
+    app.quit(); return;
+  }
   log = changeLog.createLog(historyDir());
   log.prune();
   log.append({
