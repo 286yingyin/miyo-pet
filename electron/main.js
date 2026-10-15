@@ -21,6 +21,7 @@ const packs = require('./character-packs');
 const store = require('./config-store');
 const { createHub } = require(path.join(paths.appRoot(), 'scripts/agents/hub'));
 const { createAdapter } = require(path.join(paths.appRoot(), 'scripts/agents/workbuddy'));
+const { createAdapter: createCodexAdapter } = require(path.join(paths.appRoot(), 'scripts/agents/codex'));
 const { toPetState } = require(path.join(paths.appRoot(), 'scripts/agents/schema'));
 const changeLog = require(paths.changeLog());
 
@@ -857,7 +858,8 @@ async function configureAgents() {
   if (provider === 'workbuddy' && enabled) startCredits();
 }
 async function startAgents() {
-  agentHub = createHub({ adapters: { workbuddy: createAdapter({ getConfig: () => cfg }) },
+  agentHub = createHub({ adapters: { workbuddy: createAdapter({ getConfig: () => cfg }),
+    codex: createCodexAdapter({ getConfig: () => cfg, eventDir: platformPaths.eventDir }) },
     activeProvider: agentOptions().provider, onSnapshot(value) {
       const snap = toPetState(value);
       const entry = changeLog.diffEntry(prevSnap, snap, { source: value.provider, reason: value.reason || value.phase });

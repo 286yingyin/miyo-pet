@@ -35,6 +35,9 @@ test('source save preserves unrelated settings drafts and rejects an external st
   });
   await settings.selectOption('#agentProvider','codex');
   await page.waitForFunction(async()=> (await window.petHost.getConfig()).agent?.activeProvider==='codex');
+  // Configuration is visible before configureAgents finishes and the response
+  // delivery hook is installed; wait for that boundary before releasing it.
+  await app.evaluate(async()=>{while(typeof globalThis.releaseAgentSave!=='function')await new Promise(resolve=>setTimeout(resolve,10));});
   await settings.locator('#volume').fill('0.3');await settings.locator('#volume').dispatchEvent('input');
   await app.evaluate(()=>globalThis.releaseAgentSave());
   await settings.waitForFunction(()=>document.getElementById('status').textContent.includes('Agent 来源已保存'));
@@ -87,9 +90,10 @@ test('source save preserves unrelated settings drafts and rejects an external st
 
   // A general Save queued before the source response must include the successful
   // source commit instead of replaying the agent snapshot from before that save.
-  await app.evaluate(()=>{globalThis.agentSaveHeld=false;});
+  await app.evaluate(()=>{globalThis.agentSaveHeld=false;globalThis.releaseAgentSave=null;});
   await settings.selectOption('#agentProvider','workbuddy');
   await page.waitForFunction(async()=> (await window.petHost.getConfig()).agent.activeProvider==='workbuddy');
+  await app.evaluate(async()=>{while(typeof globalThis.releaseAgentSave!=='function')await new Promise(resolve=>setTimeout(resolve,10));});
   await settings.locator('#volume').fill('0.6');await settings.locator('#volume').dispatchEvent('input');
   await settings.locator('#save').click();
   await app.evaluate(()=>globalThis.releaseAgentSave());

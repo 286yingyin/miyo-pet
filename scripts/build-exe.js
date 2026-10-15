@@ -138,7 +138,7 @@ fs.mkdirSync(path.join(APP, 'scripts'), { recursive: true });
 log('已放入 electron/（main.js / preload.js / paths.js / platform-paths.js / character-packs.js / config-store.js / icon.png）');
 
 /* 状态链路所需的脚本一个都不能少 */
-['task-status.js', 'state-core.js', 'approval-status.js', 'change-log.js', 'credits-query.js'].forEach((f) => {
+['task-status.js', 'state-core.js', 'approval-status.js', 'change-log.js', 'credits-query.js', 'codex-event.js'].forEach((f) => {
   fs.copyFileSync(path.join(ROOT, 'scripts', f), path.join(APP, 'scripts', f));
 });
 fs.cpSync(path.join(ROOT, 'scripts', 'agents'), path.join(APP, 'scripts', 'agents'), { recursive: true });

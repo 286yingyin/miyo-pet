@@ -637,6 +637,8 @@ checkModule('electron/paths.js', [
 checkModule('scripts/agents/schema.js', []);
 checkModule('scripts/agents/hub.js', []);
 checkModule('scripts/agents/workbuddy.js', []);
+checkModule('scripts/agents/codex.js', []);
+checkModule('scripts/codex-event.js', []);
 
 checkModule('electron/main.js', [
   ['统一 Agent hub', /createHub/],

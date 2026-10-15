@@ -2,6 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { normalizeThreadId } = require(path.join(require('./paths').appRoot(), 'scripts/codex-event'));
 const GLOBAL = new Set(['agent','alwaysOnTop','scope','dropStale','showApproval','approvalTtlMs','convWindowMs','usage','detect','window']);
 const ROLE = new Set(['mapping','scripts','voices','reacts','hourly','idleSprs','restSprs','lines','idleSprMs','idleBlink','idleSway','idleBreathe','stateCycleMs','idleSecs','scriptRestMs','volume','hourlyGraceMs']);
 const DISPLAY = new Set(['mode','scale','lowMem','bubble','pillVisible','pillText','pillPos']);
@@ -21,6 +22,12 @@ function merge(base, patch) {
 function validate(config) {
   if(config.schemaVersion!==2) throw error('CONFIG_UNSUPPORTED_SCHEMA');
   if(typeof config.activeCharacterId!=='string' || !config.activeCharacterId || !object(config.global) || !object(config.characters) || !Number.isSafeInteger(config.revision) || config.revision<0) throw error('CONFIG_INVALID');
+  if (config.global.agent?.codex != null) {
+    const binding = config.global.agent.codex;
+    if (!object(binding) || (binding.codexHome != null && typeof binding.codexHome !== 'string')) throw error('CONFIG_INVALID');
+    config.global.agent.codex = { codexHome: (binding.codexHome || '').trim(),
+      threadId: binding.threadId === '' || binding.threadId == null ? '' : normalizeThreadId(binding.threadId) };
+  }
   merge({},config); return config;
 }
 function split(flat) {

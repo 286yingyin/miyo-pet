@@ -221,6 +221,13 @@
         </div>
         <div class="row"><span class="lbl">启用所选来源采集</span><input type="checkbox" id="agentEnabled"></div>
         <div class="hint" id="agentHealth">尚未接入</div>
+        <div id="codexSettings" hidden>
+          <div class="row"><label class="lbl" for="codexHome">Codex 目录</label><input id="codexHome" type="text" placeholder="默认：用户目录下 .codex"></div>
+          <div class="row"><label class="lbl" for="codexThreadId">桌面聊天 ID / 本地链接</label><input id="codexThreadId" type="text" autocomplete="off" placeholder="UUID 或 codex://threads/UUID"></div>
+          <div class="row"><button id="codexBind">保存 Codex 接入</button></div>
+          <div class="hint">桌面聊天操作 → 复制 → 复制深度链接（Windows：Ctrl+Alt+L）。仅支持本机聊天，保存时只保留 UUID。目录留空使用默认值。</div>
+          <div class="hint">已验证 CLI 0.162.0-alpha.17.2（Windows 桌面 26.1007.9446.0）；未知版本停止解析。只读回合开始、完成、失败、中断；无法细分等待批准 / 输入，不提供任务数量或会话关闭状态。启动与重新启用时不重播历史完成。</div>
+        </div>
         <div class="row"><button id="agentRefresh">刷新来源状态</button></div>
         <div class="row">
           <span class="lbl">统计范围</span>
@@ -752,24 +759,36 @@
     if (!s) return;
     var health = { ready: '已接入', unconfigured: '尚未接入', stale: '读取降级，保留最近有效状态', error: '来源读取异常' };
     var phase = { running: '处理中', awaiting_approval: '等待批准', awaiting_input: '等待您输入', completed: '已完成', interrupted: '已中断', failed: '任务失败', idle: '待机', unknown: '状态未知' };
+    if (s.provider === 'codex') phase.running = '回合进行中，无法细分等待';
+    var reasons = { unsupported_version: 'CLI 版本不支持，请核对版本说明', unsupported_compression: '当前分支为压缩文件，暂不支持读取', identity_mismatch: '聊天身份不匹配或不是用户根聊天', previous_turn_unconfirmed: '上次回合状态未确认，等待新回合', source_missing: '未找到对应本地聊天文件', read_failed: '无法读取聊天文件', metadata_missing: '尚未读取到有效聊天元数据', persist_failed: '本地摘要保存失败，已抑制完成提示', invalid_event: '事件格式异常', line_too_large: '事件行超出缓存上限' };
     document.getElementById('agentHealth').textContent = (s.provider === 'codex' ? 'Codex' : 'WorkBuddy') + ' · ' +
       (s.reason === 'disabled' ? '已关闭采集' : (health[s.health] || '') + ' · ' + (phase[s.phase] || '')) +
-      (s.provider === 'codex' && s.health === 'unconfigured' && s.reason !== 'disabled' ? '：尚未配置会话接入；仅支持生命周期，等待状态暂不支持。' : '');
+      (s.provider === 'codex' && s.health === 'unconfigured' && s.reason !== 'disabled' ? '：尚未配置会话接入；仅支持生命周期，等待状态暂不支持。' : '') +
+      (reasons[s.reason] ? ' · ' + reasons[s.reason] : '');
   }
   function syncAgentSelection() {
     var provider = cfg.agent && cfg.agent.activeProvider === 'codex' ? 'codex' : 'workbuddy';
     document.getElementById('agentProvider').value = provider;
     document.getElementById('agentEnabled').checked = !cfg.agent || !cfg.agent.enabled || cfg.agent.enabled[provider] !== false;
+    document.getElementById('codexSettings').hidden = provider !== 'codex';
+    var codex = cfg.agent && cfg.agent.codex || {};
+    document.getElementById('codexHome').value = codex.codexHome || '';
+    document.getElementById('codexThreadId').value = codex.threadId || '';
   }
-  function saveAgentSelection() {
+  function saveAgentSelection(binding) {
     if (!cfg || !window.petHost || !cfg.characterId) return;
     var owner = cfg;
-    var next = Object.assign({}, cfg.agent || {});
-    next.activeProvider = document.getElementById('agentProvider').value;
-    next.enabled = Object.assign({}, next.enabled || {});
-    next.enabled[next.activeProvider] = document.getElementById('agentEnabled').checked;
+    var provider = document.getElementById('agentProvider').value;
+    var enabled = document.getElementById('agentEnabled').checked;
     saveQueue = saveQueue.catch(function () {}).then(function () {
       if (owner !== cfg) throw new Error('配置已变化，请重新选择');
+      // Merge this control's intent when it executes, after earlier narrow saves.
+      // A queued source switch must not erase a just-saved Codex binding.
+      var next = Object.assign({}, owner.agent || {});
+      next.activeProvider = provider;
+      next.enabled = Object.assign({}, next.enabled || {});
+      next.enabled[provider] = enabled;
+      if (binding && binding.threadId !== undefined) next.codex = binding;
       return window.petHost.saveConfig({ characterId: owner.characterId, baseRevision: owner.revision, patch: { agent: next } });
     }).then(function (result) {
       if (!result || !result.ok) {
@@ -781,6 +800,8 @@
       // edits, including changes made while this request was in flight.
       owner.agent = result.config.agent;
       owner.revision = result.config.revision;
+      document.getElementById('codexSettings').hidden = owner.agent.activeProvider !== 'codex';
+      if (binding && binding.threadId !== undefined) document.getElementById('codexThreadId').value = owner.agent.codex.threadId;
       setStatus('Agent 来源已保存');
       return window.petHost.getState().then(showAgentHealth);
     }).catch(function (error) {
@@ -790,10 +811,19 @@
   }
   document.getElementById('agentProvider').addEventListener('change', function () {
     var id = this.value;
+    document.getElementById('codexSettings').hidden = id !== 'codex';
     document.getElementById('agentEnabled').checked = !cfg.agent || !cfg.agent.enabled || cfg.agent.enabled[id] !== false;
     saveAgentSelection();
   });
   document.getElementById('agentEnabled').addEventListener('change', saveAgentSelection);
+  document.getElementById('codexBind').addEventListener('click', function () {
+    var value = document.getElementById('codexThreadId').value.trim();
+    if (value.indexOf('codex://') === 0) value = value.replace(/^codex:\/\/threads\//, '');
+    if (value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+      setStatus('请填写 UUID 或本地聊天深度链接；不支持远程主机及访问参数', true); return;
+    }
+    saveAgentSelection({ codexHome: document.getElementById('codexHome').value.trim(), threadId: value.toLowerCase() });
+  });
   document.getElementById('agentRefresh').addEventListener('click', function () {
     if (window.petHost && window.petHost.refreshState) window.petHost.refreshState().then(showAgentHealth);
   });

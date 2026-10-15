@@ -1553,6 +1553,10 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     if (agentLabel && state.normalizedAgent) {
       var healthLabels = { ready: '已接入', unconfigured: '尚未接入', stale: '读取降级', error: '来源异常' };
       var phaseLabels = { running: '处理中', awaiting_approval: '等待批准', awaiting_input: '等待您输入', completed: '已完成', interrupted: '已中断', failed: '任务失败', idle: state.pending > 0 ? '有待办任务' : '待机' };
+      if (state.provider === 'codex') {
+        phaseLabels.running = '回合进行中，无法细分等待';
+        phaseLabels.unknown = '状态未知';
+      }
       agentLabel.textContent = (state.provider === 'codex' ? 'Codex' : 'WorkBuddy') + ' · ' +
         (state.note === 'disabled' ? '已关闭采集' : (healthLabels[state.health] || '') + ' · ' + (phaseLabels[state.phase] || '等待配置'));
     }
