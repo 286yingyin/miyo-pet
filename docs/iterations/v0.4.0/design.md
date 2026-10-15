@@ -130,7 +130,8 @@ scripts/codex-event.js 提供纯解析接口。源文件包含对话，只在主
 kind = turn_started | turn_completed | turn_interrupted | turn_failed
 ```
 
-- 线程身份取 meta.id，不取可由子 agent 共享的 session_id。只接受 user 根线程，排除 parent、Internal/SubAgent 对象来源与非 user 的 thread_source。异常元数据降级，不借其他聊天补齐。
+- 线程身份取 meta.id，不取可由子 agent 共享的 session_id。只接受显式绑定的本地根线程，thread_source 精确允许 `user` 和已核对的 `agent_created_thread`；后者是应用工具创建的用户聊天，不是 subagent 标签。排除 parent、Internal/SubAgent 对象来源与其他 thread_source，不泛化接受任意 Feature 字符串。异常元数据降级，不借其他聊天补齐。[同版本来源定义](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/protocol/src/protocol.rs#L2828)。
+- 文件发现同时识别原始 `rollout-<timestamp>-<threadId>.jsonl` 与回退分支 `rollout-<timestamp>-<threadId>_<rolloutId>.jsonl`。按同版本官方文件系统回退规则选择最大的文件名时间与 rollout ID，不用 mtime 判断当前分支；候选限于已绑定线程，读取后仍核实 meta.id。首版不增加 SQLite 运行时依赖，此选择不是数据库权威指针；格式变化须重新核对。[文件名解析](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/rollout/src/rollout_file_name.rs#L35)与[官方回退选择](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/rollout/src/list.rs#L1339)为依据。
 - 同文件以稳定文件身份、字节偏移及可选 ordinal 排序；时间只作展示。完整换行后推进游标，半行等待；无效行 / 异常字段降级，限制单行缓存。替换 / 截断静默重建，旧游标失效。
 - 初次读取、重启、重新启用只重建历史，不庆祝。历史 start 无终态输出 stale + unknown（上次回合状态未确认）：该版本 SuspendTurnAndShutdown 可停止回合而不写终态。监听后新 start 才确认 running。不因长时间无事件假定断连。
 - 同 turn 终态不能被晚到 start 逆转，旧 turn 终态不能覆盖较新 turn。无 turnId 的 aborted 只在唯一活动回合可配对时处理，否则 unknown。ThreadRolledBack 静默重建且不庆祝；fork 继承历史不能作为新完成。
