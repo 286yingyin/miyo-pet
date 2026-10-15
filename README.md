@@ -138,3 +138,4 @@ npm run build:portable
 - 场景回归：`SMOKE2=1`（台本秒数）、`SMOKE13=1`（闲置覆盖层）配合 domstub；
   完整真机浏览器测试见 `tests\manual\`
 - 架构与模块说明：[ARCHITECTURE.md](ARCHITECTURE.md)（含「给 AI 助手」的代码库导览）
+- 后续需求、版本方案、开发计划与验证记录：[文档索引](docs/README.md)；开源协作流程见[协作规范](docs/contributing/workflow.md)。规划中的功能不代表当前版本已实现。

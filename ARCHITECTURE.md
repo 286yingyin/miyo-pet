@@ -103,6 +103,8 @@ prototype\v2\index.html  window.MiyoPet.setState(snapshot)
 
 ## 版本与文档
 
+- 后续需求与迭代入口：[docs/README.md](docs/README.md)。需求、方案、开发计划、验证记录按版本维护，规划不代表当前行为。
+- AI 维护文档须遵守 [docs/AGENTS.md](docs/AGENTS.md)；Superpowers 的 spec / plan 直接使用正式版本文档，不另建副本。
 - 版本号：`electron\package.json` 的 `version`（当前 0.3.23）
 - 迭代日志：`docs\archive\10-v2改造说明.md`（0.2.0 → 0.3.23，43+ 个版本节点）
 - 状态机制权威描述：`docs\archive\08-状态捕捉与单文件打包.md`
