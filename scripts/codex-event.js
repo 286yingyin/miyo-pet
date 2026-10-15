@@ -39,8 +39,8 @@ function parseLine(line, context = {}) {
   }
   const kinds = { task_started: 'turn_started', turn_started: 'turn_started',
     task_complete: 'turn_completed', turn_complete: 'turn_completed', turn_aborted: 'turn_interrupted' };
+  if (!Object.hasOwn(kinds, p.type)) return null;
   let kind = kinds[p.type];
-  if (!kind) return null;
   const turnId = p.turn_id == null ? null : p.turn_id;
   if (turnId === null ? kind !== 'turn_interrupted' : typeof turnId !== 'string' || !ID.test(turnId)) return invalid();
   if (row.ordinal != null && (!Number.isSafeInteger(row.ordinal) || row.ordinal < 0)) return invalid();

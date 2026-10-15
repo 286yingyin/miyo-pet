@@ -33,6 +33,19 @@ test('parser keeps only lifecycle whitelist and validates local binding',()=>{
   assert.deepEqual(Object.keys(x).sort(),['eventId','kind','observedAt','provider','schemaVersion','sessionId','sourceSequence','sourceTime','streamId','turnId'].sort());
   assert.equal(parseLine(JSON.stringify({type:'response_item',payload:{text:'SECRET'}})),null);
 });
+for (const type of ['constructor', 'toString', '__proto__']) {
+  test('parser ignores inherited event name '+type,()=>{
+    assert.equal(parseLine(JSON.stringify(event(type,'t1'))),null);
+  });
+  test('inherited event name '+type+' cannot terminate a live turn or suppress completion',async t=>{
+    const f=await fixture(t);
+    await f.append(event('task_started','t1'));
+    const ignored=await f.append(event(type,'t1'));
+    const completed=await f.append(event('task_complete','t1'));
+    assert.equal(ignored.phase,'running');assert.equal(ignored.health,'ready');assert.equal(ignored.completionKey,null);
+    assert.equal(completed.phase,'completed');assert.equal(completed.health,'ready');assert.equal(completed.completionKey,SID+':t1');
+  });
+}
 test('live lifecycle, failure, interruption and capability limits',async t=>{
   const f=await fixture(t);let s=await f.append(event('task_started','t1'));
   assert.equal(s.phase,'running');assert.equal(s.health,'ready');
