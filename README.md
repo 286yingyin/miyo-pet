@@ -21,7 +21,7 @@
 - **闲置差分**：完全待机时切换到专属差分轮播（与台本引擎互斥），空闲档位自动继承
 - **显示胶囊**：处理中 / 待办 / 待批准 / 对话数指标胶囊，位置 / 大小 / 显隐可调
 - **气泡自定义**：底色 / 透明度 / 边框 / 字体 / 缩放
-- **大小缩放**：0.5–5×；窗口始终贴屏幕右下角
+- **大小缩放**：0.5–5×；缩放保留右下角锚点，屏幕变化后恢复可见位置
 
 ### 多学生差分包（packs）
 - exe 旁 `packs\<学生>\{v1,v2}\` 放差分图 + `manifest.json` 即自动识别（支持中文目录名、
@@ -61,6 +61,43 @@ cd electron
 npm run build:portable
 :: 产物 dist-single\miyo-pet-portable.exe
 ```
+
+也可在仓库根目录执行 `node scripts/build-portable.js`。两种 Windows 构建均先准备完整产物，
+成功后才替换输出；失败保留原产物与用户 packs。重建前退出该输出目录中运行的桌宠。
+若系统占用导致恢复失败，错误会给出唯一备份目录，请保留它。已有 `packs/miyo` 不会被内置导出覆盖。
+
+构建仅自动分发 `prototype/voices` 中仓库自带的三条语音，不自动打包根目录私人 `voice/`、`packs/`。
+美代本地语音放在 exe 旁 `packs/voice/`，角色专属语音放在对应包的模式目录 `voice/` 或 manifest 引用路径；
+设置也支持明确的绝对路径 / file URL。默认配置保存在 `%APPDATA%/miyo-pet/config.json`，与 exe 输出分离。
+
+### macOS 原生入口（实机待验证）
+
+在 Mac 上安装 Node 与项目开发依赖，仓库根目录执行：
+
+```sh
+(cd electron && npm ci)
+sh electron/run.sh
+# Apple Silicon 与 Intel 分开构建；锁定 Electron 33.4.11
+node scripts/build-mac.js --arch arm64
+node scripts/build-mac.js --arch x64
+```
+
+分别输出到 `dist-mac/arm64/`、`dist-mac/x64/`，包含 `miyo-pet.app` 与 zip。
+构建使用相应架构的 Mac Electron，不复用 Windows 运行时。`MIYO_GPU=on sh electron/run.sh` 可选择硬件加速；
+Mac 启动器不默认禁用 sandbox。菜单“找回桌宠”和重新激活应用会显示并移回可见范围。
+
+**当前 Mac arm64 / x64 均未构建、未运行**；本次只有 Windows 上的命令选择、配置与路径模拟测试。
+签名和公证均未完成，公开分发前另行处理。Mac 用户后续按以下步骤补验：
+
+1. 将 `.app` 放到含中文的目录后启动，确认立绘透明、拖动、音频和设置窗口正常；尝试 0.5 / 1 / 5 倍。
+2. 核对配置位于 `~/Library/Application Support/miyo-pet/config.json`；外部包在其 `packs/`，
+   预设在 `settings/`，Agent 摘要在 `agent-events/`，均不写入 `.app`。放入中文角色目录，切换并保存。
+3. 退出后重新启动，确认配置与角色保持。隐藏后从菜单找回；休眠唤醒、切换分辨率、断开外接屏后确认仍可见。
+4. 自愿接入 Codex 时使用下文的明确聊天绑定与支持版本，确认初始历史静默、新回合开始 / 完成可见；
+   不支持的版本应显示错误，不能绕过白名单。另行记录真实失败 / 中断，以及 Mac 上实际源到画面的延迟。
+
+可用 `MIYO_USERDATA` 指定独立测试目录，例如 `MIYO_USERDATA="$HOME/桌宠测试数据" sh electron/run.sh`。
+测试打包应用时直接运行其 `Contents/MacOS/miyo-pet` 并设置相同变量；这样与日常配置隔离。
 
 ### 网页差分浏览器
 构建后 exe 旁有 `settings.html`，浏览器直接打开 → 点「📁 连接差分文件夹」选择

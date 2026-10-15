@@ -14,8 +14,10 @@
   "scripts": {
     "start": "electron .",
     "provider": "node ../scripts/status-provider.js",
-    "build:portable": "electron-builder --win portable --x64",
-    "build:dir": "electron-builder --win dir --x64"
+    "build:portable": "node ../scripts/build-portable.js",
+    "build:dir": "electron-builder --win dir --x64",
+    "build:mac:arm64": "node ../scripts/build-mac.js --arch arm64",
+    "build:mac:x64": "node ../scripts/build-mac.js --arch x64"
   },
   "devDependencies": {
     "app-builder-bin": "^4.2.0",

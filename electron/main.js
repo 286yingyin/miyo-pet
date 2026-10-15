@@ -19,6 +19,7 @@ const fs = require('fs');
 const paths = require('./paths');
 const packs = require('./character-packs');
 const store = require('./config-store');
+const { visibleBounds } = require('./window-geometry');
 const { createHub } = require(path.join(paths.appRoot(), 'scripts/agents/hub'));
 const { createAdapter } = require(path.join(paths.appRoot(), 'scripts/agents/workbuddy'));
 const { createAdapter: createCodexAdapter } = require(path.join(paths.appRoot(), 'scripts/agents/codex'));
@@ -460,6 +461,13 @@ function windowSize(mode, scale) {
    —— 注意：绝对不要在这里用 setOpacity 做防闪帧！Windows 上对 transparent 窗口调
       setOpacity 会切到 layered 模式，软件渲染下（MIYO_GPU=off 默认值）整个窗口
       从此不再绘制（内容全空但事件/菜单正常），且冷启动就会触发。 */
+function recoverWindow(show = false) {
+  if (!win || win.isDestroyed()) return;
+  const primary = screen.getPrimaryDisplay().workArea;
+  win.setBounds(visibleBounds(win.getBounds(), screen.getAllDisplays().map(display => display.workArea), primary));
+  if (show) { win.show(); win.focus(); }
+}
+function showPet() { if (!win || win.isDestroyed()) createWindow(); recoverWindow(true); }
 function applyWindow() {
   if (!win || win.isDestroyed()) return;
   const size = windowSize(cfg.mode, cfg.scale);
@@ -477,17 +485,17 @@ function applyWindow() {
     console.log('[miyo-pet] 窗口重设 ' + old.width + '×' + old.height + ' → ' + size.w + '×' + size.h +
       '（模式 ' + cfg.mode + ' · 缩放 ' + cfg.scale + '×）');
   }
+  recoverWindow();
 }
 
 function createWindow() {
-  const area = screen.getPrimaryDisplay().workAreaSize;
+  const area = screen.getPrimaryDisplay().workArea;
   const size = windowSize(cfg.mode, cfg.scale);
+  const bounds = visibleBounds({ x: area.x + area.width - size.w - 40, y: area.y + area.height - size.h,
+    width: size.w, height: size.h }, [area], area);
 
   win = new BrowserWindow({
-    width: size.w,
-    height: size.h,
-    x: Math.max(0, area.width - size.w - 40),
-    y: Math.max(0, area.height - size.h),
+    ...bounds,
     transparent: true,
     frame: false,
     resizable: false,
@@ -685,7 +693,7 @@ function petMenuTemplate() {
   return [
     {
       label: win && win.isVisible() ? '隐藏桌宠' : '显示桌宠',
-      click: function () { if (win && !win.isDestroyed()) { win.isVisible() ? win.hide() : win.show(); } refreshTray(); }
+      click: function () { if (win && !win.isDestroyed()) { win.isVisible() ? win.hide() : showPet(); } refreshTray(); }
     },
     { type: 'separator' },
     {
@@ -702,6 +710,7 @@ function petMenuTemplate() {
         { label: '全部会话', type: 'radio', checked: cfg.scope === 'all', click: function () { setScope('all'); } }
       ]
     },
+    { label: '找回桌宠', click: showPet },
     { label: '设置…', click: openSettings },
     {
       label: '始终置顶',
@@ -745,7 +754,8 @@ function openSettings() {
 function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '显示 / 隐藏', click: function () { if (win && !win.isDestroyed()) { win.isVisible() ? win.hide() : win.show(); } } },
+    { label: '显示 / 隐藏', click: function () { if (win && !win.isDestroyed()) { win.isVisible() ? win.hide() : showPet(); } } },
+    { label: '找回桌宠', click: showPet },
     { label: '设置…', click: openSettings },
     { type: 'separator' },
     { label: 'v1 · 半身差分', type: 'radio', checked: cfg.mode === 'v1', click: function () { applyMode('v1'); } },
@@ -767,7 +777,7 @@ function buildTray() {
   if (icon.isEmpty()) icon = nativeImage.createEmpty();
   tray = new Tray(icon);
   tray.setToolTip('美代桌宠 · WorkBuddy');
-  tray.on('double-click', function () { if (win && !win.isDestroyed()) { win.isVisible() ? win.hide() : win.show(); } });
+  tray.on('double-click', function () { if (win && !win.isDestroyed()) { win.isVisible() ? win.hide() : showPet(); } });
   refreshTray();
 }
 
@@ -1076,16 +1086,21 @@ app.whenReady().then(async function () {
 
   createWindow();
   buildTray();
+  if (process.platform === 'darwin') Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: '美代桌宠', submenu: [{ label: '找回桌宠', click: showPet }, { label: '设置…', click: openSettings }, { type: 'separator' }, { role: 'quit' }] },
+    { role: 'editMenu' }
+  ]));
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, () => recoverWindow());
   await startAgents();
 
   /* 休眠唤醒后补算一次（配合宽限窗口，睡太久就只记账不播） */
   try {
     if (powerMonitor && typeof powerMonitor.on === 'function') {
-      powerMonitor.on('resume', function () { setTimeout(function () { maybeChime(Date.now()); }, 3000); });
+      powerMonitor.on('resume', function () { recoverWindow(); setTimeout(function () { maybeChime(Date.now()); }, 3000); });
     }
   } catch (e) { /* ignore */ }
 
-  app.on('activate', function () { if (!win) createWindow(); });
+  app.on('activate', showPet);
 });
 
 app.on('window-all-closed', function () {

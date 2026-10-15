@@ -351,17 +351,17 @@ for (const t of TARGETS) {
 /* ---------- 打包脚本：网页端导出 ---------- */
 console.log('\n--- scripts/build-exe.js / build-portable.js（网页端导出） ---');
 {
-  const bx = fs.readFileSync(path.join(ROOT, 'scripts', 'build-exe.js'), 'utf8');
-  const bp = fs.readFileSync(path.join(ROOT, 'scripts', 'build-portable.js'), 'utf8');
-  if (/settings\.html/.test(bx) && /__WEB_VERSION__/.test(bx) && /__WEB_ONLY__/.test(bx))
-    ok('build-exe 导出网页端（版本 + WEB_ONLY 注入）');
-  else bad('build-exe 缺网页端导出');
-  if (/miyo-web/.test(bx) && /full_low/.test(bx)) ok('build-exe 附带 miyo-web 资源副本');
-  else bad('build-exe 缺 miyo-web 资源附带');
-  if (/settings\.html/.test(bp) && /miyo-web/.test(bp)) ok('build-portable 附带 miyo-web 资源副本');
-  else bad('build-portable 缺 miyo-web 资源附带');
-  if (/settings\.html/.test(bp) && /__WEB_ONLY__/.test(bp)) ok('build-portable 同步导出网页端（WEB_ONLY）');
-  else bad('build-portable 缺网页端导出');
+  const output = fs.mkdtempSync(path.join(require('os').tmpdir(), 'miyo-check-export-'));
+  try {
+    require('./build-support').exportWeb(ROOT, output);
+    const web = fs.readFileSync(path.join(output, 'settings.html'), 'utf8');
+    const version = require('../electron/package.json').version;
+    if (web.includes("var WEB_VERSION = '" + version + "'") && web.includes('var WEB_ONLY = true')) ok('共享网页导出：版本与 WEB_ONLY 注入');
+    else bad('共享网页导出注入缺失');
+    if (fs.existsSync(path.join(output, 'miyo-web/v2/assets/full_low/00.png')) && fs.existsSync(path.join(output, 'packs/miyo/manifest.json'))) ok('共享网页导出：内置差分与 miyo-web');
+    else bad('共享网页导出资源缺失');
+  } catch (error) { bad('网页导出失败：' + error.message); }
+  finally { fs.rmSync(output, { recursive: true, force: true }); }
 }
 
 /* ---------- 设置窗口 ---------- */

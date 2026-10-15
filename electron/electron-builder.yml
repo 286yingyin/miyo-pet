@@ -29,6 +29,7 @@ files:
   - platform-paths.js
   - character-packs.js
   - config-store.js
+  - window-geometry.js
   - icon.png
   - package.json
 
@@ -42,6 +43,8 @@ extraResources:
       - '!ix-test.js'
       - '!build-exe.js'
       - '!build-portable.js'
+      - '!build-mac.js'
+      - '!build-support.js'
       - '!status-provider.js'
   - from: ../prototype/v1
     to: app-root/prototype/v1
@@ -58,6 +61,16 @@ extraResources:
       - '!packs/**'   # 0.3.23：其他学生差分包不入分发产物
   - from: ../prototype/voices
     to: app-root/prototype/voices
+    filter:
+      - CH0317_Title.ogg
+      - ch0317_season_newyear.ogg
+      - ch0317_season_xmas.ogg
+
+mac:
+  target: zip
+  artifactName: miyo-pet-${version}-mac-${arch}.${ext}
+  category: public.app-category.entertainment
+  identity: null
 
 win:
   target:
