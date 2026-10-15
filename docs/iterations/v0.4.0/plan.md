@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，用户行为与出口条件见 [requirements.md](requirements.md)。
 
-状态：**待评审草案，所有任务尚未执行**。创建：2026-10-15。不是已批准的执行指令；T1 完成后据真实桌面事件补齐源映射，再评审 T5 的入口实现。
+状态：**2026-10-15 用户批准按子代理流程开始开发**。先完成 Windows Codex 桌面端与 Windows 产物；Mac 兼容代码和验收步骤随版提供，真实 Mac 由用户后续补验。T1 的实际源映射由控制代理与子代理核实后继续 T5，不重复等待范围内开发授权。
 
 ## Global Constraints
 
@@ -44,7 +44,7 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 
 执行时先检查 `git status`，保存用户改动；功能开发另建 `codex/<topic>` 分支，按所选执行流程使用隔离工作区。每项功能测试先失败、再实现、再通过；只暂存本任务文件。以下代码路径均相对于仓库根，尚未创建的文件在任务中明确列出。
 
-## T1：验证真实 Codex 桌面事件入口
+## Task 1: T1 验证真实 Codex 桌面事件入口
 
 **文件：** 更新本版 `design.md`、`verification.md`；脱敏合成样本在实现 T5 时纳入测试，真实对话不入库。
 
@@ -58,7 +58,7 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 
 **通过条件：** Codex 桌面核心状态有可重放来源，必要缺口已处理并记录范围评审。未通过时，Codex 交付不得标完成；T2 / T3 / T4 仍可独立推进。
 
-## T2：平台路径边界与缩放一致性
+## Task 2: T2 平台路径边界与缩放一致性
 
 **文件：** 新增 `electron/platform-paths.js`、`tests/platform-paths.test.js`；修改 `electron/paths.js`、`electron/main.js`、`prototype/v2/index.html` 及必要静态检查。
 
@@ -70,7 +70,7 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 - [ ] 实现路径纯函数，接入配置 / 包根定位；改用 `pathToFileURL`，统一页面缩放上限。不改平台无关台本行为。
 - [ ] 运行路径测试、浏览器缩放用例、`node scripts/check.js`、`node scripts/test-status.js`，结果写入验证记录；提交本任务 diff。
 
-## T3：统一角色包与配置迁移
+## Task 3: T3 统一角色包与配置迁移
 
 **文件：** 新增 `electron/character-packs.js`、`electron/config-store.js`、`tests/characters.test.js`、`tests/config-store.test.js`；修改 `electron/main.js`、`prototype/v2/index.html`、`prototype/v2/settings.html`；合成夹具由测试写入临时目录。
 
@@ -83,7 +83,7 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 - [ ] 在真实浏览器验证 A → B → A、重启恢复、快速切换晚回调、缺号和无语音场景；断言无串图 / 串台词、最终活动角色和磁盘一致。
 - [ ] 运行新增测试与现有两项检查；验证网页差分浏览器和预设未退化，更新验证记录并提交。
 
-## T4：Agent 契约、来源选择与 WorkBuddy 回归
+## Task 4: T4 Agent 契约、来源选择与 WorkBuddy 回归
 
 **文件：** 新增 `scripts/agents/schema.js`、`scripts/agents/workbuddy.js`、`scripts/agents/hub.js`、`tests/agents.test.js`；修改 `electron/main.js`、`electron/preload.js`、两份 v2 HTML 及必要静态检查。原 `state-core.js` 仅按确实必要的兼容点修改。
 
@@ -95,7 +95,7 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 - [ ] 页面显示来源和 health，来源数量未知时隐藏计数；区分 awaiting_input 与 WorkBuddy pending 文案；来源故障不进入任务失败表情。
 - [ ] 运行新增测试和原 29 项状态断言，真实 Electron 验证关闭采集后无后续状态推送、再次开启恢复、无 WorkBuddy 纯摆宠正常；记录并提交。
 
-## T5：Codex 桌面端适配与最小事件桥
+## Task 5: T5 Codex 桌面端适配与最小事件桥
 
 **前置：** T1 桌面入口与源映射已评审成立；依赖 T2 路径和 T4 契约。
 
@@ -110,7 +110,7 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 - [ ] 在真实 Codex **桌面端**重做 T1 场景，量测从事件接收到画面更新 ≤5 秒；验证禁用、桌宠重启和用户已有 hooks 可恢复。仅 CLI 成功不勾选本项。
 - [ ] 记录平台 / 桌面版本 / 支持缺口 / 脱敏证据，执行全套自动检查，提交本任务。
 
-## T6：原生 Mac 启动、产物与桌面 UI 验证
+## Task 6: T6 原生 Mac 启动、产物与桌面 UI 验证
 
 **文件：** 修改 `electron/run.sh`、`electron/package.json`、`electron/electron-builder.yml`、必要的 `electron/main.js` 平台窗口 / 菜单逻辑；新增 `scripts/build-mac.js`、`tests/manual/v040-regression.js`；更新实际用户说明和构建说明。
 
@@ -119,18 +119,18 @@ T2 平台路径 + 缩放 ── T3 角色与配置 ── T6 平台构建 / UI �
 - [ ] 先用假文件系统 / 命令调用桩验证 Mac 启动 / 构建不会选择 `.exe`、`npm.cmd` 或写入资源目录；将平台测试扩展到这条命令选择。
 - [ ] 实现原生 Mac 启动、分架构构建、菜单恢复入口及屏外可见性夹取；不增加自动穿透 / 全屏策略等后续功能。
 - [ ] `tests/manual/v040-regression.js` 复用现有测试方式，用真实 Chromium + 模拟 petHost 验证缩放、角色与设置 UI；再用 Electron 验证透明窗口、拖动、音频、托盘 / 菜单。
-- [ ] 在真实 Mac 执行 `sh electron/run.sh`，分别验证开发态与 arm64 / x64 构建目标；无对应设备的架构标“构建通过、运行未验证”。
-- [ ] 至少一台 Mac 从 `.app` 启动，验证 userData 写入、中文路径、重启、休眠 / 屏幕变化；复测 Codex 桌面事件。记录签名状态与首次启动行为。
+- [ ] 提供 `sh electron/run.sh` 与 arm64 / x64 构建命令，Windows 以命令选择和路径测试验证；未运行的 Mac 构建标“未构建”，不能直接填构建通过。
+- [ ] 将 Mac `.app` 的 userData、中文路径、重启、休眠 / 屏幕变化及 Codex 验收写成操作步骤；用户后续执行，本次不因待 Mac 实机停止 Windows 交付。
 - [ ] Windows 构建目录版和 portable，验证外部 packs / 网页设置导出 / 用户原配置；运行全套检查，记录并提交。
 
-## T7：联合验收与发布准备
+## Task 7: T7 联合验收与发布准备
 
 **文件：** 更新本版四份文档、`docs/requirements/roadmap.md`、根 `README.md`、`ARCHITECTURE.md`；只有确认发布编号后才修改 `electron/package.json` 版本及必要锁文件。
 
 - [ ] 按验证矩阵完成 AC-01～AC-14 的证据回填，区分自动测试、模拟宿主、真实 Electron、Codex 桌面与 Mac 产物。
 - [ ] 在最终代码提交执行现有检查和新增测试，检查 `git diff --check`；不拿早期某次通过覆盖后来的代码。
 - [ ] 进行整体代码评审，特别检查适配器释放资源、配置恢复和角色异步切换；处理发现后重跑相关检查。
-- [ ] 整理支持矩阵、已知限制、升级 / 回退说明；若 Codex 桌面或 Mac 实机仍缺证据，结论保持未达成，不发布为已支持。
+- [ ] 整理支持矩阵、已知限制、升级 / 回退说明；Windows Codex 桌面缺证据时明确缺口，Mac 待实机单列，不阻塞 Windows PR，不发布为 Mac 已验证。
 - [ ] 经版本评审确定发布编号；通过个人 fork PR 合入上游后，由有权限的维护者决定正式发布。
 
 ## 执行记录

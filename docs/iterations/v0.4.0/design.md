@@ -1,6 +1,6 @@
 # v0.4.0 技术方案
 
-状态：待评审草案。创建：2026-10-15。代码基线：`9ff3645`。本文件同时作为 Superpowers 规格文档，不另建 spec 副本。
+状态：2026-10-15 用户批准按本版开发，子代理预审后实施中。代码基线：`9ff3645`。本文件同时作为 Superpowers 规格文档，不另建 spec 副本。先交付 Windows 验证版；Mac 代码兼容随版实现，实机由用户后续验证，未实测不阻塞 Windows PR。
 
 关联：[需求与验收](requirements.md) · [开发计划](plan.md) · [验证](verification.md)
 
@@ -74,11 +74,12 @@ phase: "unknown" | "idle" | "running" | "awaiting_approval" |
 counts: { processing: number|null, pending: number|null, approval: number|null }
 completionKey: string | null
 observedAt: number                 本机接收时间，毫秒
-rev: number                        本次桌宠进程内单调递增
+rev: number                        hub 对外统一分配，本次桌宠进程内单调递增
 reason: string | null              稳定原因码，不含原始错误正文
 ```
 
 - `null` 代表来源未提供数量；不能把一个正在运行的回合解释成若干任务。Codex 只显示状态，未证明存在的任务数胶囊隐藏。
+- adapter 内部版本不得直接作为页面 rev；hub 串行处理来源启停，过滤上一生命周期回调，切换来源也必须递增对外 rev。归一宿主的完成提示只接受 completionKey，禁止页面根据计数下降自行推断完成；切换 / 禁用 / 中断清除旧来源的瞬态完成与失败。
 - `health` 是接入质量，`phase` 是工作状态。路径尚未配置不等于任务出错；已接入后读取失败保留最后有效状态并标记降级，不产生 `completionKey`。
 - 没有事件不等于断连；长时间待机或等待批准不能仅因“最后活动很久以前”变成错误。`stale` 必须来自读失败、明确连接丢失或重启后无法确认旧运行状态等可解释条件。
 - 适配器工厂为 `createAdapter(options)`，返回 `start(emit)`、`refresh()`、`stop()`；三个方法都返回 Promise，`start` / `stop` 结果为 void，`refresh()` 结果为 `AgentSnapshot`。`emit(snapshot)` 同步接收完整快照，不能由调用方改写；`start` / `stop` 幂等，`stop()` 释放 watcher、timer 和子进程，关闭后禁止后续 emit。
@@ -120,7 +121,8 @@ WorkBuddy 的 pending 继续表示真实待办任务，仍使用原有 pending �
 
 ```text
 { schemaVersion:1, provider:"codex", sessionId, turnId,
-  kind, requestId:null|string, eventId, sourceTime:null|number, observedAt }
+  kind, requestId:null|string, eventId, sourceTime:null|number,
+  sourceSequence:null|number, streamId:null|string, observedAt }
 kind = turn_started | turn_completed | turn_interrupted | turn_failed |
        approval_requested | approval_resolved | input_requested | input_resolved |
        session_closed
@@ -128,11 +130,11 @@ kind = turn_started | turn_completed | turn_interrupted | turn_failed |
 
 这是桌宠自有协议，不是声称 Codex 原生存在同名事件。每个 kind 必须有技术验证中真实源事件映射；未覆盖项不能由时间猜出。
 
-- 事件写入用户数据目录的 `agent-events/codex/`，会话 ID 必须编码为安全文件名，不允许路径穿越；事件按会话分流，单行完整提交，读半行等待下一次读取。
+- 事件写入用户数据目录的 `agent-events/codex/`；桥采用每事件独立文件，同目录临时文件写完再 rename，以免并发 hooks 交错追加或轮转破坏游标。文件名使用事件 ID 的摘要，不直接拼接会话 ID；适配器只读已提交文件。兼容测试覆盖截断文件，不把半文件当有效事件。
 - `eventId` 优先从源 ID 取得；没有源 ID 时按稳定字段构造去重键，不用每次随机 ID 让重放变成新事件。
 - 不能假设异步 hooks 到达顺序就是事件发生顺序。按 session / turn 隔离，终态不能被同一 turn 的晚到开始事件逆转；不同 requestId 分别配对，旧 turn 不能清除新 turn 等待。
 - 若源有序号使用源序号；否则保留终态优先和请求配对，无法无歧义排序的情况输出 unknown，并写明诊断原因。
-- 保存已消费游标和已展示完成键；重启可以恢复状态，不重播历史完成提示。错误 / 截断保留 lastGood，不触发“全部完成”。
+- 保存已消费事件 ID、请求已解决标记和已展示完成键；resolve 先于 request 时保留 tombstone，防止晚到请求重新挂起。完成键成功持久化后才发提示，重启不重播历史完成。事件日志不是唯一当前状态源，裁剪不得移除尚需恢复的活动回合摘要；错误 / 截断保留 lastGood，不触发“全部完成”。
 - 桌宠不批准请求、不读取认证文件，也不修改 Codex 对话数据。入口配置变更应先展示修改内容并支持恢复，不覆盖用户已有 hooks；注册的信任步骤按 Codex 当前要求处理。
 - 事件目录默认本地使用、轮转保留最近 7 天、单文件上限 2 MiB；来源关闭后停止读取。无网络接收端。
 
@@ -140,7 +142,7 @@ kind = turn_started | turn_completed | turn_interrupted | turn_failed |
 
 ## 5. 平台与路径
 
-- `platform-paths.js` 提供 `resolvePaths({ platform, userDataDir, appRoot, portableDir })`，返回 `{ resourceRoot, configDir, packRoots, eventDir }`；纯函数可在无 Mac 的 Node 测试中验证。
+- `platform-paths.js` 提供 `resolvePaths({ platform, userDataDir, appRoot, portableDir })`，返回 `{ resourceRoot, configDir, packRoots, presetDir, eventDir }`；额外可接受 exeDir / isPackaged 以保留 Windows 目录版。Mac 预设保存、删除、打开目录均使用 userData 下的 presetDir，不落入 `.app`。纯函数可在无 Mac 的 Node 测试中验证。
 - 内置图片与默认包来自只读资源目录。Mac 的用户配置、外部 packs、事件固定放 `app.getPath('userData')` 下；不以 `.app` 所在目录作为写入位置。
 - Windows 保留显式 portable / 既有用户配置位置和 exe 旁 packs 的兼容；旧路径发现只读探测，迁移先备份，不搬走用户素材。开发态可显式指定测试目录。
 - 所有文件 URL 使用 `pathToFileURL`，不手写 `file:///` 拼接，覆盖中文、空格、`#`、`%`。
@@ -185,7 +187,19 @@ characters: {
 
 `global` 保存 Agent 选择、检测开关、窗口开关和用户日程；角色拥有表现相关设置。提醒的时间 / 内容属于全局，触发时用当前角色已定义的表现；不为每个角色重复创建同一日程。
 
-接口：`migrateConfig(raw, selectedLegacyId)` 同步返回 `{ config, changed }`，其中 raw 为已解析对象；`readConfig(file): Promise<ConfigV2>` 负责原始备份、解析、迁移和校验；`writeConfig(file, config): Promise<void>` 采用同目录临时文件 + rename；`getCharacterConfig(config, id, defaults)` 同步返回该角色配置，只在读取时合并默认与用户覆盖。配置不存在才创建默认配置；损坏或不兼容时抛出稳定错误码并由主进程提供恢复入口，不自动覆盖。页面所需旧字段通过投影提供，不在磁盘维护第二套全局副本。
+接口：`migrateConfig(raw, selectedLegacyId)` 同步返回 `{ config, changed }`，其中 raw 为已解析对象；先发现包，再由 `readConfig(file, { resolveLegacyId }): Promise<ConfigV2>` 解析旧目录身份并负责备份、迁移和校验。缺包保留其原身份和配置，不转移给美代。`writeConfig(file, config): Promise<void>` 采用同目录临时文件 + rename；`getCharacterConfig(config, id, defaults)` 同步返回该角色配置，只在读取时合并默认与用户覆盖。配置不存在才创建默认配置；损坏或不兼容时抛出稳定错误码并由主进程提供恢复入口，不自动覆盖。页面所需旧字段通过投影提供，不在磁盘维护第二套全局副本。
+
+现有可写字段归属：
+
+| 归属 | 字段 |
+| --- | --- |
+| 全局 Agent / 窗口 | alwaysOnTop、scope、dropStale、showApproval、approvalTtlMs、convWindowMs、usage、detect、新 agent 选择 |
+| 角色表现 | mapping、lines、voices、reacts、scripts、restSprs、idleSprs、idleSprMs、idleBlink、idleSway、idleBreathe、stateCycleMs、idleSecs、scriptRestMs、volume、hourly、hourlyGraceMs |
+| 角色显示 | mode、scale、lowMem、bubble、pillVisible、pillText、pillPos，以及清洗器当前支持的气泡 / 胶囊样式字段 |
+| 提醒 | id / name / 时间 / 频率 / enabled / done / lastFired 为全局；scripts / ackScripts 按 reminder ID 归角色，旧版完整提醒迁移后保持等效 |
+| 元信息 | _v、schemaVersion、revision、activeCharacterId；series 为兼容投影；packIds / packFiles / URLs 等为运行时派生，不作为用户覆盖 |
+
+实现时以 normalizeConfig 与设置页写入字段核对完整性，新识别的可写字段必须归类且补迁移测试；未知字段保留。旧预设导入先经过同一迁移，应用到其声明角色；跨角色应用需显式选择，不覆盖其他角色。
 
 迁移步骤：
 
@@ -194,7 +208,7 @@ characters: {
 3. 提取全局开关与日程；保留未知字段。再次迁移 schema 2 不新增角色或重置数据。
 4. 迁移结果通过校验才原子写入；备份恢复方式写入用户说明。旧版应用读取新版配置不作兼容承诺，降级使用备份。
 
-切换流程：先完成当前角色保存 → 校验目标包 → 从目标 defaults + overrides 生成新配置 → 取消旧台本 / 音频并使旧异步加载失效 → 应用目标 → 持久化活动 ID。用切换代数 token 防止快速 A → B → A 的旧图片 / 音频回调覆盖新角色；失败保持原角色。
+保存请求必须携带 `{ characterId, baseRevision, patch }`；主进程串行提交，拒绝角色身份或 revision 过期的请求并返回最新投影。旧设置窗口不得将平面整套配置写给当前新角色。切换流程：先保存当前角色 → 校验目标包 → 生成候选配置 → 原子持久化活动 ID 与新 revision → 广播新投影并取消旧台本 / 音频。写失败保持旧角色；切换代数 token 使旧图片 / 音频回调失效。
 
 ## 7. 性能与测试边界
 
