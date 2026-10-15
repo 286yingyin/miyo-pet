@@ -39,15 +39,15 @@
 | 用例 ID | 关联验收 | 场景 / 关键断言 | 负责阶段 | 当前结果 |
 | --- | --- | --- | --- | --- |
 | WIN-01 | AC-01、AC-14 | Windows 目录版 / portable 启动、互动、台本、语音、整点、提醒、预设、网页导出 | T6 / T7 | 未执行 |
-| WB-01 | AC-01、AC-02 | 原 29 项；无数据不报任务错，已有数据读失败不归零 / 不完成 | T4 | 原测试通过；新行为未执行 |
+| WB-01 | AC-01、AC-02 | 原 29 项；无数据不报任务错，已有数据读失败不归零 / 不完成 | T4 | 原 29 项与新增 Node / Electron 回归通过；任务评审通过 |
 | UI-01 | AC-03 | 0.5、2、5 倍；重复应用配置后显示 / 窗口一致 | T2 / T6 | Chromium 回归通过；实际窗口联合验证待 T6 |
-| AG-01 | AC-04、AC-05 | 来源独立启停，关闭后 watcher / timer 释放且不 emit；反复开关不重复注册 | T4 | 未执行 |
-| AG-02 | AC-02、AC-05 | 无来源、来源异常、任务失败分开；未知数量隐藏；切换来源不重放完成 | T4 | 未执行 |
+| AG-01 | AC-04、AC-05 | 来源独立启停，关闭后 watcher / timer 释放且不 emit；反复开关不重复注册 | T4 | 单元与真实 Electron 合成回归通过；任务评审通过 |
+| AG-02 | AC-02、AC-05 | 无来源、来源异常、任务失败分开；未知数量隐藏；切换来源不重放完成 | T4 | Node 与真实 Electron 渲染回归通过；任务评审通过 |
 | CX-01 | AC-06 | 桌面端真实开始 / 运行 / 完成 / 中断 / 失败，记录版本和源事件 | T1 / T5 | 未执行 |
 | CX-02 | AC-06 | 桌面批准 / 输入等待及恢复；不通过桌宠执行批准 | 后续 | 当前入口不支持；用户批准首版排除，界面必须说明 |
 | CX-03 | AC-07 | 重复、半行、乱序、旧 turn / request、重放与多会话不串状态；完成只提示一次 | T5 | 未执行 |
 | CX-04 | AC-04、AC-07 | 禁用、断连、桌宠 / Codex 重启；事件收到至 UI ≤5 秒，长待机不误判断连 | T5 / T6 | 未执行 |
-| CX-05 | AC-06、AC-14 | 桥仅落盘白名单元数据；恶意 sessionId 不越界；已有 hooks 可恢复 | T5 | 未执行 |
+| CX-05 | AC-06、AC-14 | rollout 白名单不泄漏正文；线程身份 / 路径校验；仅保存读取摘要，不修改 hooks | T5 | 未执行 |
 | PATH-01 | AC-10 | Mac 不写 `.app`；Windows 保留旧根；中文 / 空格 / `#` / `%` 路径 URL 正确 | T2 / T6 | 路径 / 配置测试与真实 Windows 音频通过；Mac 实机待补验 |
 | MAC-01 | AC-08、AC-09 | 真实 Mac 开发态与 `.app`：显示、拖动、菜单 / 设置、音频、保存、重启 | T6 | 未执行，待实机 |
 | MAC-02 | AC-09 | 休眠恢复、显示器变化后可找回，负坐标屏幕不会使窗口丢失 | T6 | 未执行，待实机 |
@@ -92,8 +92,8 @@ T1 已核对当前 Windows 桌面本地文件与同版本官方源码。下表�
 | Windows x64 | Node 与浏览器基线已检查 | 未执行 | 未执行 |
 | macOS arm64 | 无实机证据 | 未执行 | 未执行 |
 | macOS x64 | 无实机证据 | 未执行 | 未执行 |
-| WorkBuddy | 合成状态测试 29 项通过 | 不适用 | 新适配未验证 |
-| Codex 桌面端 | 尚无事件入口实测 | 不适用 | 未验证，首版必要目标 |
+| WorkBuddy | 合成状态测试 29 项通过 | 不适用 | 新适配 Node / Electron 合成回归通过，任务评审通过；最终产物待验 |
+| Codex 桌面端 | 已核对指定桌面聊天真实 start / complete 与同版本源码 | 不适用 | 尚未接入新适配器，端到端待验 |
 | Codex CLI | 版本 / help 已检查 | 不适用 | 集成未验证，非桌面替代 |
 
 每次更新矩阵应补实际 OS / 架构 / 应用版本；仅编译成功不能写成运行支持。
@@ -121,7 +121,7 @@ T1 已核对当前 Windows 桌面本地文件与同版本官方源码。下表�
 
 ## 7. 发布判定
 
-**当前结论：不满足 v0.4.0 发布条件。** T2 已评审通过，T3 已通过任务评审；Agent 适配、最终 Windows 产物及联合验收尚未完成。Mac 实机保留待用户补验。
+**当前结论：不满足 v0.4.0 发布条件。** T2 已评审通过，T3 已通过任务评审；T4 Agent 契约已通过评审；Codex 适配、最终 Windows 产物及联合验收尚未完成。Mac 实机保留待用户补验。
 
 发布前逐项检查：
 
@@ -145,3 +145,13 @@ T1 已核对当前 Windows 桌面本地文件与同版本官方源码。下表�
 
 
 T3 修复复审（75d78b0）：独立评审复现连续内部保存丢第二次操作，修复为队列执行时绑定内部请求身份 / revision；显式渲染页请求仍拒绝过期写入。真实文件队列验证不同字段并发及菜单 false→true 两次操作均落盘。另用 A/B 不同合成 PCM 音频观察 Native Audio loadeddata、playing、play promise 与 currentTime；切到 B 后 A 停止并归零，释放 A 的迟到回调后 B 仍播放，切回保留各自路径。node --test tests/main-config-path.test.js tests/config-store.test.js tests/characters-electron.test.js 12/12 通过，静态与 diff 检查通过；独立限定复审确认两项已解决。最终联合测试仍由 T7 执行。
+
+### 2026-10-15：T4 Agent 契约与 WorkBuddy 生命周期实施
+
+提交 ca224b4。新增 schema / hub / WorkBuddy adapter，主进程复用一个 hub 分配递增 revision；归一宿主仅按 completionKey 庆祝。监听、轮询、去抖与积分查询由所选来源的启用状态管理，整点提醒独立调度。Codex 在此阶段尚无读取器，选择后显示未接入且隐藏未知数量 / 积分，不回读 WorkBuddy。
+
+Windows / Node v24.12.0 / Electron 33.4.11。首个 RED 为模块尚未实现；后续自查补出两个真实失败：旧定时器回调覆盖新生命周期句柄、adapter 启动失败遗留资源。修复后 node --test tests/agents.test.js tests/agents-electron.test.js tests/agents-main.test.js 为 13/13、0 skipped；修复前完整 tests/*.test.js 为 43/43，最终联合全套由 T7 重跑。原状态断言 29/29、check.js、diff 检查通过。
+
+真实 Electron 加载实际 main / preload / 页面，使用隔离的合成 WorkBuddy 目录：禁用后观察 2.8 秒，无继续读取或状态推送；手动刷新 / 页面重载也不读取；启用恢复 processing；完成后紧接刷新仍保留提示；设置将 agent 保存至 global。渲染回归覆盖不按计数下降庆祝、完成键一次性、中断清理、失败表情与未接入待机。积分测试证明切换来源取消拥有的子进程、定时器并忽略迟到结果；缺失 WorkBuddy 仍可启动待机。独立任务评审发现的设置草稿问题已修复并复审通过。此结果不证明真实 Codex 接入、最终产物或 Mac 实机可用。
+
+T4 修复复审（c694d8f）：实际设置页先修改缩放 / 检测，再切换来源会丢草稿，已修复为来源保存成功只更新 agent / revision。另覆盖请求期间继续编辑、立即排队普通保存不写回旧来源、真实 rename EACCES 保留草稿并恢复来源控件、CONFIG_STALE 明确重载且不重放旧配置。先复现三个行为失败，再执行 node --test tests/agents-electron.test.js tests/characters-electron.test.js tests/config-store.test.js，10/10、0 skipped；静态与 diff 检查通过。独立限定复审确认全部解决，无新增阻塞问题。
