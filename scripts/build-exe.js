@@ -141,6 +141,7 @@ log('已放入 electron/（main.js / preload.js / paths.js / platform-paths.js /
 ['task-status.js', 'state-core.js', 'approval-status.js', 'change-log.js', 'credits-query.js'].forEach((f) => {
   fs.copyFileSync(path.join(ROOT, 'scripts', f), path.join(APP, 'scripts', f));
 });
+fs.cpSync(path.join(ROOT, 'scripts', 'agents'), path.join(APP, 'scripts', 'agents'), { recursive: true });
 log('已放入 scripts/（task-status / state-core / approval-status / change-log / credits-query）');
 
 /* prototype：v1 + v2 都要（右键菜单要能切版本）；跳过只用于开发的文件 */

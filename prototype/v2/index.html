@@ -373,6 +373,7 @@
         <div class="pill idling off" id="pillIdle">
           <span class="dot"></span><span id="tIdleA">已空闲 </span><span class="num" id="nIdle">0</span><span id="tIdleB"> 秒</span>
         </div>
+        <div class="pill" id="pillAgent"><span id="agentStatus">WorkBuddy · 尚未接入</span></div>
         <div class="pill convs" id="pillCredits" title="今日消耗的 WorkBuddy 积分（每小时自动刷新）">
           <span class="dot"></span><span id="tCreditsA">今日积分 </span><span class="num" id="nCredits">—</span><span id="tCreditsB"></span>
         </div>
@@ -810,6 +811,12 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   }
 
   function resolveMode(s) {
+    if (s.normalizedAgent) {
+      if (s.phase === 'failed') return 'error';
+      if (s.phase === 'awaiting_approval' && showApproval && (lastCfg.detect || {}).approval !== false) return 'approval';
+      if (s.phase === 'awaiting_input') return 'pending';
+      if (s.phase === 'running' && s.pending <= 0 && (lastCfg.detect || {}).working !== false) return 'processing';
+    }
     if (s.error) return 'error';                              // 连续读不到状态 → 明确的错误态
     if (showApproval && s.approval > 0) return 'approval';    // 权限待批准：优先级最高
     if (s.pending > 0) return 'pending';                      // 待办（语义已收窄，不代表权限）
@@ -1326,6 +1333,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   }
 
   /* ---------- 胶囊显隐（设置里可逐项关掉；关掉 = 整行消失） ---------- */
+  var creditsAvailable = false;
   var pillVisible = { working: true, asking: true, idle: true, conversations: true, scope: true, credits: true };
 
   /* ---------- 胶囊文案自定义（0.2.16）：cfg.pillText ----------
@@ -1352,14 +1360,14 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
   Object.keys(PILL_TEXT_DEF).forEach(function (k) { PILL_TEXT[k] = splitPillTpl(PILL_TEXT_DEF[k]); });
 
   function applyPillVisible() {
-    els.pillWorking.classList.toggle('hide', pillVisible.working === false);
-    els.pillAsking.classList.toggle('hide', pillVisible.asking === false);
+    els.pillWorking.classList.toggle('hide', pillVisible.working === false || (state.normalizedAgent && state.counts.processing === null));
+    els.pillAsking.classList.toggle('hide', pillVisible.asking === false || (state.normalizedAgent && state.counts.pending === null));
     els.pillIdle.classList.toggle('hide', pillVisible.idle === false);
-    els.pillConvs.classList.toggle('hide', pillVisible.conversations === false);
-    els.pillApproval.classList.toggle('hide', showApproval === false);
-    els.pillCredits.classList.toggle('hide', pillVisible.credits === false);
+    els.pillConvs.classList.toggle('hide', pillVisible.conversations === false || (state.normalizedAgent && state.provider !== 'workbuddy'));
+    els.pillCredits.classList.toggle('hide', pillVisible.credits === false || (state.normalizedAgent && (state.provider !== 'workbuddy' || state.phase === 'unknown')) || creditsAvailable === false);
     /* 统计范围胶囊也可隐藏（0.2.3 起，老师要求归入显示指标）；
        隐藏后切换口径走设置页的「统计范围」分段选择。 */
+    els.pillApproval.classList.toggle('hide', !showApproval || (state.normalizedAgent && state.counts.approval === null));
     els.pillScope.classList.toggle('hide', pillVisible.scope === false);
   }
 
@@ -1541,6 +1549,13 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     els.scopeText.textContent = allScope ? '全部会话（含历史）' : '仅当前会话';
     els.pillScope.classList.toggle('alerting', allScope);
     applyPillVisible();
+    var agentLabel = document.getElementById('agentStatus');
+    if (agentLabel && state.normalizedAgent) {
+      var healthLabels = { ready: '已接入', unconfigured: '尚未接入', stale: '读取降级', error: '来源异常' };
+      var phaseLabels = { running: '处理中', awaiting_approval: '等待批准', awaiting_input: '等待您输入', completed: '已完成', interrupted: '已中断', failed: '任务失败', idle: state.pending > 0 ? '有待办任务' : '待机' };
+      agentLabel.textContent = (state.provider === 'codex' ? 'Codex' : 'WorkBuddy') + ' · ' +
+        (state.note === 'disabled' ? '已关闭采集' : (healthLabels[state.health] || '') + ' · ' + (phaseLabels[state.phase] || '等待配置'));
+    }
 
     els.pet.setAttribute('data-degraded', state.degraded ? '1' : '0');
     els.pet.setAttribute('data-remind', activeReminder ? activeReminder.phase : '0');
@@ -1566,6 +1581,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
                         ['pending', 'approval', 'error'].indexOf(mode) < 0);
     if (state.bubble !== false && !bubbleSilent) {
       var btxt = live ? (live.line || lineOf(mode)) : lineOf(mode);
+      if (state.normalizedAgent && state.phase === 'awaiting_input' && (!live || !live.kind)) btxt = '正在等待您输入。';
       if (!btxt) {
         /* 0.3.19：无台词（含废弃的默认 idle 台词已删）→ 气泡静默 */
         els.bubble.classList.remove('show');
@@ -1656,8 +1672,10 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
      ======================================================= */
   function touch() { lastActivity = Date.now(); idleOffset = 0; }
 
+  var seenCompletions = new Set();
   function setState(patch) {
     if (!patch || typeof patch !== 'object') return;
+    patch = Object.assign({}, patch);
 
     /* rev 单调闸：宿主 IPC 带 rev；开发态 status.json 不带 rev 就放行。
        作用：陈旧来源不会覆盖更新的来源。 */
@@ -1678,6 +1696,16 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
       if (det.approval === false) patch.approval = 0;
     }
 
+    if (patch.normalizedAgent) {
+      if (state.provider !== patch.provider || state.sessionId !== patch.sessionId ||
+          patch.phase === 'unknown' || patch.phase === 'interrupted' || patch.phase === 'failed' || patch.health !== 'ready') {
+        state.done = false; doneUntil = 0;
+      }
+      state.normalizedAgent = true; state.provider = patch.provider; state.health = patch.health;
+      state.phase = patch.phase; state.sessionId = patch.sessionId; state.counts = patch.counts;
+      state.note = patch.reason || '';
+      if (det.enabled === false) state.phase = 'unknown';
+    }
     var before = state.processing + state.pending;
     if (typeof patch.processing === 'number') state.processing = Math.max(0, Math.floor(patch.processing));
     if (typeof patch.pending === 'number') state.pending = Math.max(0, Math.floor(patch.pending));
@@ -1696,13 +1724,17 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     if (typeof patch.showApproval === 'boolean') showApproval = patch.showApproval;
 
     /* 完成态：优先信主进程的 justDone（它只在「健康快照」上置位） */
-    if (patch.justDone === true) { state.done = true; doneUntil = Date.now() + 8000; }
+    if (patch.normalizedAgent) {
+      if (det.enabled !== false && patch.health === 'ready' && patch.phase === 'completed' && patch.completionKey && !seenCompletions.has(patch.completionKey)) {
+        seenCompletions.add(patch.completionKey); state.done = true; doneUntil = Date.now() + 8000;
+      }
+    } else if (patch.justDone === true) { state.done = true; doneUntil = Date.now() + 8000; }
 
     var after = state.processing + state.pending;
     if (after !== before) {
       touch();
       /* 只有健康快照才允许用计数推断完成 —— 避免「读失败」被误判成「做完了」 */
-      if (!patch.degraded && patch.ok !== false) {
+      if (!patch.normalizedAgent && !patch.degraded && patch.ok !== false) {
         state.done = (before > 0 && after === 0);
         doneUntil = state.done ? Date.now() + 8000 : 0;
       }
@@ -1725,7 +1757,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
         approval: state.approval, completed: state.completed,
         conversations: state.conversations, scope: state.scope,
         ok: state.ok, degraded: state.degraded, error: state.error,
-        rev: lastRev, idleSec: idleSeconds()
+        rev: lastRev, idleSec: idleSeconds(), provider: state.provider, health: state.health, phase: state.phase, counts: state.counts, done: state.done
       };
     },
     getMode: function () { return resolveMode(state); },
@@ -2587,6 +2619,7 @@ MiyoPet.setMapping('processing', ['36','09']);   // 设为一组</pre>
     if (typeof window.petHost.onCredits === 'function') {
       window.petHost.onCredits(function (c) {
         if (!c || !els.nCredits) return;
+        creditsAvailable = !!c.ok; applyPillVisible();
         if (c.ok) {
           els.nCredits.textContent = String(c.today);
           els.pillCredits.title = '今日消耗 ' + c.today + ' · 累计 ' + c.total +

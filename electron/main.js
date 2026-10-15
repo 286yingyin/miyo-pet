@@ -1,16 +1,10 @@
 /**
  * 美代桌宠 · Electron 主进程
  * ---------------------------------------------------------------------------
- * 状态链路（单源化）
- *   真源  %CODEBUDDY_CONFIG_DIR%\{tasks, sessions, audit-log}
- *     ↓ 只由本进程读取（scripts/state-core.js）
- *   PetSnapshot{ rev, ok, degraded, error, justDone, scope, session,
- *                processing, pending, approval, completed, stale, total, active[] }
- *     ↓ IPC  miyo-state
- *   renderer.MiyoPet.setState()  ← 纯消费
- *
- * 触发时机： fs.watch（tasks / sessions / audit spool）求快 + 2 秒轮询求稳（永不取消）
- *           watch 事件先去抖 350ms 合并，再补一次 300ms 收敛
+ * 状态链路：来源适配器 → Agent hub（进程内单调 rev）→ toPetState → miyo-state IPC。
+ * WorkBuddy 适配器拥有 watcher、350ms 去抖、300ms 收敛与 2s 轮询；禁用时全部释放。
+ * 来源 health 与任务 phase 分离；页面只按 completionKey 提示完成。
+ * 整点计时独立于来源，积分查询仅在 WorkBuddy 采集开启时运行。
  *
  * 其他： 透明置顶窗口 · 右键原生菜单 · 设置窗口 · 系统托盘 · 变化记录 JSONL
  * 运行： 用同目录 run.cmd / run.sh（会先清掉 ELECTRON_RUN_AS_NODE）
@@ -25,7 +19,9 @@ const fs = require('fs');
 const paths = require('./paths');
 const packs = require('./character-packs');
 const store = require('./config-store');
-const core = require(paths.stateCore());
+const { createHub } = require(path.join(paths.appRoot(), 'scripts/agents/hub'));
+const { createAdapter } = require(path.join(paths.appRoot(), 'scripts/agents/workbuddy'));
+const { toPetState } = require(path.join(paths.appRoot(), 'scripts/agents/schema'));
 const changeLog = require(paths.changeLog());
 
 /* ------------------------------------------------------------------
@@ -72,25 +68,14 @@ const WIN_BY_MODE = {
 };
 const MIN_SCALE = 0.5;   // 0.3.3 取消每学生倍率后统一一套；范围放大适配不同立绘（0.3.5）
 const MAX_SCALE = 5;     // 0.3.10：上限 5×（老师要求由 10 调整）
-const POLL_MS = 2000;          // 兜底轮询：永不取消
-const COALESCE_MS = 350;       // watch 事件去抖
-const SETTLE_MS = 300;         // 事件后的收敛补算
-const MIN_EMIT_MS = 250;       // IPC 节流
-
 let win = null;
 let settingsWin = null;
 let tray = null;
-let pollTimer = null;
-let coalesceTimer = null;
-let settleTimer = null;
-let pendingReason = null;
-let lastEmitAt = 0;
-let lastRev = -1;
 let prevSnap = null;
-let prevError = false;
 let log = null;
-let watchers = [];
-let watchSession = null;
+let agentHub = null;
+let agentSettingsKey = null;
+let hourlyTimer = null;
 
 /* =======================================================
    配置
@@ -425,7 +410,7 @@ async function publishConfig(candidate) {
   await store.writeConfig(configFile(), candidate);
   configV2 = candidate; cfg = next;
   applyWindow(); applyTop(cfg.alwaysOnTop); sendConfig(); refreshTray();
-  lastRev = -1; if (log) tick('manual', '配置已保存', true);
+  if (agentHub) await configureAgents();
   return { ok: true, config: cfg };
 }
 function submitConfig(request, targetId) {
@@ -531,8 +516,7 @@ function bindHealthLog() {
   win.webContents.on('did-finish-load', function () {
     sendConfig();
     if (lastCredits) send('miyo-credits', lastCredits);   // 页面重载后补发积分（0.2.14）
-    lastRev = -1;                                  // 页面重载后强制重推一次状态
-    tick('boot', '窗口就绪', true);
+    if (agentHub) send('miyo-state', toPetState(agentHub.getSnapshot()));
     win.webContents.executeJavaScript(
       'JSON.stringify({' +
       ' ready: document.readyState,' +
@@ -581,6 +565,7 @@ const os = require('os');
 const creditsLedgerFile = path.join(app.getPath('userData'), 'credits.json');
 let creditsLedger = { day: null, base: 0, lastTotal: 0 };
 let creditsNode = null;              // 缓存找到的 Node 22 exe 路径
+let creditsTimer = null, creditsChild = null, creditsKill = null, creditsEpoch = 0;
 let lastCredits = null;              // 最近一次推送（页面 reload 后补发用）
 
 function creditsTodayStr(d) {
@@ -614,6 +599,9 @@ function findCreditsNode() {
   return creditsNode;
 }
 function pollCredits() {
+  const options = agentOptions();
+  if (!options.enabled || options.provider !== 'workbuddy' || creditsChild) return;
+  const epoch = creditsEpoch;
   const nodeExe = findCreditsNode();
   if (!nodeExe) {
     lastCredits = { ok: false, note: '未找到 Node 22+，读不了 workbuddy.db' };
@@ -627,15 +615,16 @@ function pollCredits() {
   let out = '', done = false, child;
   try { child = spawn(nodeExe, [script], { windowsHide: true }); }
   catch (e) { lastCredits = { ok: false, note: e.message }; send('miyo-credits', lastCredits); return; }
-  const kill = setTimeout(function () { try { child.kill(); } catch (e2) { /* ignore */ } }, 10000);
-  child.stdout.on('data', function (d) { out += String(d); });
+  creditsChild = child;
+  const kill = creditsKill = setTimeout(function () { try { child.kill(); } catch (e2) { /* ignore */ } }, 10000);
+  child.stdout.on('data', function (d) { if (!done && epoch === creditsEpoch) out += String(d); });
   child.on('error', function (e) {
-    if (done) return; done = true; clearTimeout(kill);
+    if (done || epoch !== creditsEpoch) return; done = true; clearTimeout(kill); creditsChild = null; creditsKill = null;
     lastCredits = { ok: false, note: e.message };
     send('miyo-credits', lastCredits);
   });
   child.on('close', function () {
-    if (done) return; done = true; clearTimeout(kill);
+    if (done || epoch !== creditsEpoch) return; done = true; clearTimeout(kill); creditsChild = null; creditsKill = null;
     let r = null;
     out.split(/\r?\n/).forEach(function (line) {
       const s = line.trim();
@@ -658,10 +647,20 @@ function pollCredits() {
     send('miyo-credits', lastCredits);
   });
 }
+function stopCredits() {
+  ++creditsEpoch;
+  if (creditsTimer) clearInterval(creditsTimer);
+  if (creditsKill) clearTimeout(creditsKill);
+  if (creditsChild) { try { creditsChild.kill(); } catch {} }
+  creditsTimer = creditsChild = creditsKill = null;
+  lastCredits = { ok: false, note: '当前来源未提供积分' };
+  send('miyo-credits', lastCredits);
+}
 function startCredits() {
+  if (creditsTimer) return;
   loadCreditsLedger();
   pollCredits();
-  setInterval(pollCredits, 60 * 1000);        // 每 60s 刷新（积分变化不频繁，够用）
+  creditsTimer = setInterval(pollCredits, 60 * 1000);        // 每 60s 刷新（积分变化不频繁，够用）
 }
 
 function applyMode(mode) {
@@ -756,7 +755,7 @@ function refreshTray() {
     { type: 'separator' },
     { label: '打开变化记录', click: openHistory },
     { label: '重新载入', click: function () { if (win && !win.isDestroyed()) win.reload(); } },
-    { label: '立即刷新', click: function () { lastRev = -1; tick('manual', '手动刷新', true); } },
+    { label: '立即刷新', click: function () { if (agentHub) agentHub.refresh(); } },
     { type: 'separator' },
     { label: '退出', click: function () { app.quit(); } }
   ]));
@@ -836,104 +835,40 @@ function maybeChime(now) {
 }
 
 /* =======================================================
-   状态：一次完整刷新
+   Agent 来源生命周期与状态投影
    ======================================================= */
-function tick(source, reason, force) {
-  const snap = core.snapshot({
-    scope: cfg.scope === 'all' ? 'all' : 'current',
-    dropStale: cfg.dropStale,
-    approvalTtlMs: cfg.approvalTtlMs
-  });
-
-  /* --- 记录变化 --- */
-  const forceLog = !!force || snap.justDone || (snap.error !== prevError);
-  const entry = changeLog.diffEntry(prevSnap, snap, { source: source, reason: reason, force: forceLog });
-  if (entry && log) log.append(entry);
-  if (prevSnap && snap.session !== prevSnap.session && log) {
-    log.append({
-      kind: 'session', source: source, scope: snap.scope, session: snap.session,
-      prev: { session: prevSnap.session }, next: { session: snap.session },
-      reason: '会话切换：' + (snap.sessionReason || ''), degraded: snap.degraded, errors: []
-    });
-  }
-  prevSnap = snap;
-  prevError = snap.error;
-
-  /* --- 推送（rev 变了才发，并做节流）--- */
-  const now = Date.now();
-  if (snap.rev !== lastRev && (now - lastEmitAt >= MIN_EMIT_MS || snap.rev === 0)) {
-    lastRev = snap.rev;
-    lastEmitAt = now;
-    send('miyo-state', snap);
-  }
-
-  ensureWatchers(snap.session);
-  maybeChime(Date.now());            // 整点播报：复用 2 秒兜底节奏，休眠唤醒后也能自然补算
-  return snap;
+function agentOptions() {
+  const agent = cfg.agent || {};
+  const provider = agent.activeProvider === 'codex' ? 'codex' : 'workbuddy';
+  const enabled = (!agent.enabled || agent.enabled[provider] !== false) && cfg.detect.enabled !== false;
+  return { provider, enabled };
 }
-
-/* =======================================================
-   触发：fs.watch（求快） + 轮询（求稳）
-   ======================================================= */
-function scheduleRecompute(source, reason) {
-  pendingReason = { source: source, reason: reason };
-  if (coalesceTimer) return;                 // 去抖窗口内的事件直接合并
-  coalesceTimer = setTimeout(function () {
-    coalesceTimer = null;
-    const p = pendingReason; pendingReason = null;
-    if (!p) return;
-    tick(p.source, p.reason, false);
-    if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(function () {   // 批量落盘的尾部再收敛一次
-      settleTimer = null;
-      tick('watch', '收敛补算', false);
-    }, SETTLE_MS);
-  }, COALESCE_MS);
+async function configureAgents() {
+  const { provider, enabled } = agentOptions();
+  const key = JSON.stringify([provider, enabled, cfg.scope, cfg.dropStale, cfg.approvalTtlMs, cfg.agent]);
+  if (key === agentSettingsKey) return;
+  // Invalidate old callbacks and completion baselines before a configuration change.
+  stopCredits();
+  await agentHub.setEnabled(agentHub.getSnapshot().provider, false);
+  await agentHub.setEnabled(provider, false);
+  await agentHub.setActiveProvider(provider);
+  await agentHub.setEnabled(provider, enabled);
+  agentSettingsKey = key;
+  if (provider === 'workbuddy' && enabled) startCredits();
 }
-
-function watchDir(key, dir, reason) {
-  const exist = watchers.find(function (w) { return w.key === key; });
-  if (exist && exist.dir === dir) return;                       // 已在监听
-  if (exist) { try { exist.watcher.close(); } catch (e) { /* ignore */ } watchers = watchers.filter(function (w) { return w !== exist; }); }
-  if (!dir) return;
-  try { if (!fs.existsSync(dir)) return; } catch (e) { return; }
-  try {
-    const w = fs.watch(dir, { persistent: true }, function () { scheduleRecompute('watch', reason); });
-    w.on('error', function () {
-      try { w.close(); } catch (e) { /* ignore */ }
-      watchers = watchers.filter(function (x) { return x.watcher !== w; });   // 下一拍重建
-      scheduleRecompute('poll', 'watcher 出错，改为轮询');
-    });
-    watchers.push({ key: key, dir: dir, watcher: w });
-  } catch (e) {
-    console.log('[miyo-pet] watch 挂载失败 ' + dir + '：' + (e.code || e.message));
-  }
-}
-
-function ensureWatchers(session) {
-  const roots = core.resolveRoots();
-  watchDir('tasks', roots.tasks, '任务目录变化');
-  watchDir('sessions', roots.sessions, '会话心跳变化');
-  watchDir('audit-spool', roots.spool, '权限事件');
-  watchDir('audit', roots.audit, '审计归档变化');
-  if (session !== watchSession) {           // 会话切换 → 任务目录的 watcher 必须重建
-    const prevW = watchSession;
-    watchSession = session;
-    watchDir('tasks-session', session ? path.join(roots.tasks, session) : null, '当前会话任务变化');
-    if (log && prevW !== null) {             // 首次初始化不算「切换」，不记噪音
-      log.append({
-        kind: 'health', source: 'watch', scope: cfg.scope === 'all' ? 'all' : 'current', session: session,
-        prev: { watching: prevW }, next: { watching: session },
-        reason: 'watcher 重建：' + (session || '(未锁定)'), degraded: !session, errors: []
-      });
-    }
-  }
-}
-
-function startWatchers() {
-  ensureWatchers(null);
-  pollTimer = setInterval(function () { tick('poll', '定时兜底', false); }, POLL_MS);
-  tick('boot', '启动', true);
+async function startAgents() {
+  agentHub = createHub({ adapters: { workbuddy: createAdapter({ getConfig: () => cfg }) },
+    activeProvider: agentOptions().provider, onSnapshot(value) {
+      const snap = toPetState(value);
+      const entry = changeLog.diffEntry(prevSnap, snap, { source: value.provider, reason: value.reason || value.phase });
+      if (entry && log) log.append(entry);
+      prevSnap = snap;
+      send('miyo-state', snap);
+      if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('miyo-state', snap);
+    } });
+  await configureAgents();
+  hourlyTimer = setInterval(() => maybeChime(Date.now()), 2000);
+  maybeChime(Date.now());
 }
 
 /* =======================================================
@@ -1083,7 +1018,8 @@ ipcMain.handle('packs-list', function () {
   }
   return out;
 });
-ipcMain.handle('state-get', function () { return prevSnap; });
+ipcMain.handle('state-refresh', async function () { if (agentHub) await agentHub.refresh(); return agentHub ? toPetState(agentHub.getSnapshot()) : null; });
+ipcMain.handle('state-get', function () { return agentHub ? toPetState(agentHub.getSnapshot()) : null; });
 /* 应用版本（0.2.10）：设置页显示，方便核对跑的是新包还是旧包 */
 ipcMain.handle('app-version', function () { return app.getVersion(); });
 ipcMain.handle('history-tail', function (_e, n) { return log ? log.tail(n || 100) : []; });
@@ -1118,7 +1054,7 @@ app.whenReady().then(async function () {
   log.append({
     kind: 'boot', source: 'boot', scope: cfg.scope, session: null,
     prev: null, next: null,
-    reason: '启动 · 数据根 ' + core.resolveRoots().root, degraded: false, errors: []
+    reason: '启动 · Agent 来源 ' + agentOptions().provider, degraded: false, errors: []
   });
   if (migrations.length) {                 // 一次性配置迁移：留痕，方便回溯「数字为什么变了」
     log.append({
@@ -1129,7 +1065,7 @@ app.whenReady().then(async function () {
   }
 
   /* 重启不重播：从变化记录里找回「最近一次播报是哪一小时」。
-     ⚠️ 必须在 startWatchers() 之前做 —— 它会立刻 tick 一次并触发 maybeChime，
+     ⚠️ 必须在 startAgents() 之前做 —— 它会启动独立整点时钟并触发 maybeChime，
      放在后面就会先播一次再恢复状态（踩过这个坑）。 */
   try {
     const last = log.tail(200).find(function (r) { return r && r.kind === 'chime'; });
@@ -1138,8 +1074,7 @@ app.whenReady().then(async function () {
 
   createWindow();
   buildTray();
-  startWatchers();
-  startCredits();                           // 今日消耗积分（0.2.14）：启动即算 + 每 60s 刷新
+  await startAgents();
 
   /* 休眠唤醒后补算一次（配合宽限窗口，睡太久就只记账不播） */
   try {
@@ -1152,9 +1087,7 @@ app.whenReady().then(async function () {
 });
 
 app.on('window-all-closed', function () {
-  if (pollTimer) clearInterval(pollTimer);
-  if (coalesceTimer) clearTimeout(coalesceTimer);
-  if (settleTimer) clearTimeout(settleTimer);
-  watchers.forEach(function (w) { try { w.watcher.close(); } catch (e) { /* ignore */ } });
-  app.quit();
+  if (hourlyTimer) clearInterval(hourlyTimer);
+  stopCredits();
+  if (agentHub) agentHub.dispose().finally(() => app.quit()); else app.quit();
 });

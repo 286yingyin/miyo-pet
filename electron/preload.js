@@ -4,10 +4,9 @@
  * 只暴露一个最小桥： window.petHost
  *
  *   — 状态 —
- *   onState(cb)           接收主进程推送的 PetSnapshot
- *                         { rev, ok, degraded, error, justDone, scope, session,
- *                           processing, pending, approval, completed, stale, total, active[] }
- *   getState()            主动读一次当前快照（Promise）
+ *   onState(cb)           接收 AgentSnapshot + toPetState 兼容字段（nullable counts 保留）
+ *   getState()            读取缓存快照（Promise，不扫描来源）
+ *   refreshState()        刷新已启用来源后读快照（Promise）
  *   onConfig(cb)          接收配置（映射 / 大小 / 置顶 / 版本 / 统计范围）
  *   getConfig()           读当前配置（Promise）
  *   saveConfig(request)   按 characterId/baseRevision/patch 保存（Promise）
@@ -50,6 +49,7 @@ contextBridge.exposeInMainWorld('petHost', {
   /* 状态 */
   onState(cb) { on('miyo-state', cb); },
   getState() { return ipcRenderer.invoke('state-get'); },
+  refreshState() { return ipcRenderer.invoke('state-refresh'); },
   onConfig(cb) { on('miyo-config', cb); },
   getConfig() { return ipcRenderer.invoke('config-get'); },
   saveConfig(cfg) { return ipcRenderer.invoke('config-save', cfg); },

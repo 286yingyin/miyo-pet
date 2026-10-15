@@ -216,6 +216,13 @@
         </div>
 
         <div class="row">
+          <span class="lbl">Agent 来源（全局）</span>
+          <select id="agentProvider"><option value="workbuddy">WorkBuddy</option><option value="codex">Codex</option></select>
+        </div>
+        <div class="row"><span class="lbl">启用所选来源采集</span><input type="checkbox" id="agentEnabled"></div>
+        <div class="hint" id="agentHealth">尚未接入</div>
+        <div class="row"><button id="agentRefresh">刷新来源状态</button></div>
+        <div class="row">
           <span class="lbl">统计范围</span>
           <div class="seg" id="segScope">
             <button data-scope="current">仅当前会话</button>
@@ -296,7 +303,7 @@
         </div>
 
         <div class="row">
-          <span class="lbl">WorkBuddy 状态检测（总开关）</span>
+          <span class="lbl">Agent 状态检测（总开关）</span>
           <input type="checkbox" id="detEnabled">
         </div>
         <div class="row">
@@ -312,8 +319,7 @@
           <input type="checkbox" id="detPending">
         </div>
         <div class="hint">
-          总开关关闭后三类数值恒为 0：对应胶囊不再弹出，也不会触发对应状态的台词与反应
-          （「全部完成 / 出错」不受影响）。分类开关可单独关掉某一类。
+          总开关关闭后停止来源采集与积分查询，清除完成和失败状态；分类开关可单独隐藏某一类提示。
         </div>
 
         <div class="row">
@@ -740,6 +746,41 @@
     });
     saveQueue = task; return task;
   }
+
+  function showAgentHealth(s) {
+    if (!s) return;
+    var health = { ready: '已接入', unconfigured: '尚未接入', stale: '读取降级，保留最近有效状态', error: '来源读取异常' };
+    var phase = { running: '处理中', awaiting_approval: '等待批准', awaiting_input: '等待您输入', completed: '已完成', interrupted: '已中断', failed: '任务失败', idle: '待机', unknown: '状态未知' };
+    document.getElementById('agentHealth').textContent = (s.provider === 'codex' ? 'Codex' : 'WorkBuddy') + ' · ' +
+      (s.reason === 'disabled' ? '已关闭采集' : (health[s.health] || '') + ' · ' + (phase[s.phase] || '')) +
+      (s.provider === 'codex' && s.health === 'unconfigured' && s.reason !== 'disabled' ? '：尚未配置会话接入；仅支持生命周期，等待状态暂不支持。' : '');
+  }
+  function saveAgentSelection() {
+    if (!cfg || !window.petHost || !cfg.characterId) return;
+    var owner = cfg;
+    var next = Object.assign({}, cfg.agent || {});
+    next.activeProvider = document.getElementById('agentProvider').value;
+    next.enabled = Object.assign({}, next.enabled || {});
+    next.enabled[next.activeProvider] = document.getElementById('agentEnabled').checked;
+    saveQueue = saveQueue.catch(function () {}).then(function () {
+      if (owner !== cfg) throw new Error('配置已变化，请重新选择');
+      return window.petHost.saveConfig({ characterId: owner.characterId, baseRevision: owner.revision, patch: { agent: next } });
+    }).then(function (result) {
+      if (result && result.config) adoptConfig(result.config);
+      if (!result || !result.ok) throw new Error(result && result.error === 'CONFIG_STALE' ? '配置已变化，已重新载入，请重新编辑' : '保存失败');
+      setStatus('Agent 来源已保存');
+      return window.petHost.getState().then(showAgentHealth);
+    }).catch(function (error) { setStatus(error.message, true); });
+  }
+  document.getElementById('agentProvider').addEventListener('change', function () {
+    var id = this.value;
+    document.getElementById('agentEnabled').checked = !cfg.agent || !cfg.agent.enabled || cfg.agent.enabled[id] !== false;
+    saveAgentSelection();
+  });
+  document.getElementById('agentEnabled').addEventListener('change', saveAgentSelection);
+  document.getElementById('agentRefresh').addEventListener('click', function () {
+    if (window.petHost && window.petHost.refreshState) window.petHost.refreshState().then(showAgentHealth);
+  });
 
   var editVer = 'v2';          // 正在编辑哪一套映射
   var curMode = 'idle';        // 图库要追加到哪个状态
@@ -2762,6 +2803,9 @@
     ['enabled', 'approval', 'working', 'pending'].forEach(function (k) {
       if (typeof cfg.detect[k] !== 'boolean') cfg.detect[k] = true;
     });
+    document.getElementById('agentProvider').value = cfg.agent && cfg.agent.activeProvider === 'codex' ? 'codex' : 'workbuddy';
+    var provider = document.getElementById('agentProvider').value;
+    document.getElementById('agentEnabled').checked = !cfg.agent || !cfg.agent.enabled || cfg.agent.enabled[provider] !== false;
     el.detEnabled.checked = cfg.detect.enabled !== false;
     el.detApproval.checked = cfg.detect.approval !== false;
     el.detWorking.checked = cfg.detect.working !== false;
@@ -2970,6 +3014,8 @@
     loadHistory();
     setInterval(loadHistory, 5000);
     refreshPresets();
+    if (window.petHost.onState) window.petHost.onState(showAgentHealth);
+    if (window.petHost.getState) window.petHost.getState().then(showAgentHealth);
 
     /* 内置台词对照（单一真源 = 桌宠页上报）；拿不到就稍后重试一次 */
     if (window.petHost && typeof window.petHost.getBuiltins === 'function') {

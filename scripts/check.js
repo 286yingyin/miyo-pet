@@ -634,12 +634,13 @@ checkModule('electron/paths.js', [
   ['兼容 app-root / 目录版两种布局', /app-root/]
 ]);
 
+checkModule('scripts/agents/schema.js', []);
+checkModule('scripts/agents/hub.js', []);
+checkModule('scripts/agents/workbuddy.js', []);
+
 checkModule('electron/main.js', [
-  ['引用状态内核', /require\(paths\.stateCore\(\)\)/],
-  ['fs.watch 监听', /fs\.watch/],
-  ['去抖窗口', /COALESCE_MS/],
-  ['兜底轮询', /POLL_MS/],
-  ['会话切换重建 watcher', /ensureWatchers/],
+  ['统一 Agent hub', /createHub/],
+  ['独立整点定时器', /hourlyTimer = setInterval/],
   ['变化记录落盘', /changeLog\.createLog/],
   ['历史 IPC', /history-tail/],
   ['统计范围菜单', /统计范围/],

@@ -36,7 +36,7 @@ extraResources:
   - from: ../scripts
     to: app-root/scripts
     filter:
-      - '**/*.js'
+      - '**/*.js' # Includes agents/schema.js, hub.js and source adapters.
       - '!check.js'
       - '!test-status.js'
       - '!ix-test.js'
