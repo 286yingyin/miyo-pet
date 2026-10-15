@@ -730,9 +730,10 @@
   }
   function saveCurrent() {
     const owner = cfg, generation = switchGeneration;
-    const patch = JSON.parse(JSON.stringify(cfg));
     const task = saveQueue.catch(function () {}).then(function () {
       if (owner !== cfg || generation !== switchGeneration) throw new Error('角色已切换，请重新保存');
+      // Earlier narrow saves may commit agent/revision while this Save is queued.
+      const patch = JSON.parse(JSON.stringify(owner));
       if (!cfg.characterId) return window.petHost.saveConfig(patch);
       return window.petHost.saveConfig({ characterId: owner.characterId, baseRevision: owner.revision, patch: patch });
     }).then(function (result) {
@@ -755,6 +756,11 @@
       (s.reason === 'disabled' ? '已关闭采集' : (health[s.health] || '') + ' · ' + (phase[s.phase] || '')) +
       (s.provider === 'codex' && s.health === 'unconfigured' && s.reason !== 'disabled' ? '：尚未配置会话接入；仅支持生命周期，等待状态暂不支持。' : '');
   }
+  function syncAgentSelection() {
+    var provider = cfg.agent && cfg.agent.activeProvider === 'codex' ? 'codex' : 'workbuddy';
+    document.getElementById('agentProvider').value = provider;
+    document.getElementById('agentEnabled').checked = !cfg.agent || !cfg.agent.enabled || cfg.agent.enabled[provider] !== false;
+  }
   function saveAgentSelection() {
     if (!cfg || !window.petHost || !cfg.characterId) return;
     var owner = cfg;
@@ -766,11 +772,21 @@
       if (owner !== cfg) throw new Error('配置已变化，请重新选择');
       return window.petHost.saveConfig({ characterId: owner.characterId, baseRevision: owner.revision, patch: { agent: next } });
     }).then(function (result) {
-      if (result && result.config) adoptConfig(result.config);
-      if (!result || !result.ok) throw new Error(result && result.error === 'CONFIG_STALE' ? '配置已变化，已重新载入，请重新编辑' : '保存失败');
+      if (!result || !result.ok) {
+        if (result && result.error === 'CONFIG_STALE' && result.config && owner === cfg) adoptConfig(result.config);
+        throw new Error(result && result.error === 'CONFIG_STALE' ? '配置已变化，已重新载入，请重新编辑' : '保存失败');
+      }
+      if (owner !== cfg) throw new Error('配置已变化，忽略旧保存回调');
+      // Only agent was submitted. Keep the editor object and all unrelated draft
+      // edits, including changes made while this request was in flight.
+      owner.agent = result.config.agent;
+      owner.revision = result.config.revision;
       setStatus('Agent 来源已保存');
       return window.petHost.getState().then(showAgentHealth);
-    }).catch(function (error) { setStatus(error.message, true); });
+    }).catch(function (error) {
+      if (owner === cfg) syncAgentSelection();
+      setStatus(error.message, true);
+    });
   }
   document.getElementById('agentProvider').addEventListener('change', function () {
     var id = this.value;
@@ -2803,9 +2819,7 @@
     ['enabled', 'approval', 'working', 'pending'].forEach(function (k) {
       if (typeof cfg.detect[k] !== 'boolean') cfg.detect[k] = true;
     });
-    document.getElementById('agentProvider').value = cfg.agent && cfg.agent.activeProvider === 'codex' ? 'codex' : 'workbuddy';
-    var provider = document.getElementById('agentProvider').value;
-    document.getElementById('agentEnabled').checked = !cfg.agent || !cfg.agent.enabled || cfg.agent.enabled[provider] !== false;
+    syncAgentSelection();
     el.detEnabled.checked = cfg.detect.enabled !== false;
     el.detApproval.checked = cfg.detect.approval !== false;
     el.detWorking.checked = cfg.detect.working !== false;

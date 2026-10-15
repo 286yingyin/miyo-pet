@@ -6,6 +6,100 @@ const os=require('node:os');
 const path=require('node:path');
 const {snapshot,toPetState}=require('../scripts/agents/schema');
 
+test('source save preserves unrelated settings drafts and rejects an external stale revision',{timeout:60000},async t=>{
+  const {_electron}=require(process.env.MIYO_PLAYWRIGHT_MODULE||'playwright-core');
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'miyo-agent-draft-'));
+  const env={...process.env,MIYO_USERDATA:path.join(dir,'user'),MIYO_CONFIG:path.join(dir,'config.json'),CODEBUDDY_CONFIG_DIR:path.join(dir,'missing'),WORKBUDDY_TASKS_DIR:path.join(dir,'missing','tasks')};delete env.ELECTRON_RUN_AS_NODE;
+  const bootstrap=path.join(dir,'bootstrap.cjs');
+  await fs.writeFile(bootstrap,`globalThis.fixtureFs=require('node:fs/promises');require(${JSON.stringify(path.resolve(__dirname,'../electron/main.js'))});`);
+  const app=await _electron.launch({executablePath:require('../electron/node_modules/electron'),args:[bootstrap],env});
+  t.after(async()=>{await app.close().catch(()=>{});await fs.rm(dir,{recursive:true,force:true});});
+  const page=await app.firstWindow();await page.waitForFunction(()=>window.petHost&&window.MiyoPet);
+  const settingsPromise=app.waitForEvent('window');await page.evaluate(()=>window.petHost.openSettings());const settings=await settingsPromise;
+  const errors=[];settings.on('pageerror',e=>errors.push(e.message));
+  await settings.waitForFunction(()=>document.getElementById('scale').value!==''&&document.getElementById('agentEnabled').checked);
+  await settings.locator('#scale').fill('1.7');await settings.locator('#scale').dispatchEvent('input');
+  await settings.uncheck('#detEnabled');
+  // Delay only delivery of the real save response, after actual validation/persistence.
+  // Edits while IPC is pending must survive as well as edits made before it started.
+  await app.evaluate(({ipcMain})=>{
+    const save=ipcMain._invokeHandlers.get('config-save');ipcMain.removeHandler('config-save');
+    ipcMain.handle('config-save',async(e,request)=>{
+      const result=await save(e,request);
+      if(request.patch.agent&&Object.keys(request.patch).length===1&&!globalThis.agentSaveHeld){
+        globalThis.agentSaveHeld=true;
+        await new Promise(resolve=>{globalThis.releaseAgentSave=resolve;});
+      }
+      return result;
+    });
+  });
+  await settings.selectOption('#agentProvider','codex');
+  await page.waitForFunction(async()=> (await window.petHost.getConfig()).agent?.activeProvider==='codex');
+  await settings.locator('#volume').fill('0.3');await settings.locator('#volume').dispatchEvent('input');
+  await app.evaluate(()=>globalThis.releaseAgentSave());
+  await settings.waitForFunction(()=>document.getElementById('status').textContent.includes('Agent 来源已保存'));
+  assert.equal(await settings.locator('#scale').inputValue(),'1.7');
+  assert.equal(await settings.locator('#detEnabled').isChecked(),false);
+  assert.equal(await settings.locator('#volume').inputValue(),'0.3');
+  const sourceOnly=await page.evaluate(()=>window.petHost.getConfig());
+  assert.notEqual(sourceOnly.scale,1.7,'source selection must not prematurely commit the unrelated draft');
+  assert.notEqual(sourceOnly.detect.enabled,false);
+  await settings.locator('#save').click();
+  await settings.waitForFunction(()=>document.getElementById('status').textContent.includes('已保存并生效'));
+  let committed=await page.evaluate(()=>window.petHost.getConfig());
+  assert.equal(committed.scale,1.7);assert.equal(committed.detect.enabled,false);assert.equal(committed.volume,0.3);assert.equal(committed.agent.activeProvider,'codex');
+  let disk=JSON.parse(await fs.readFile(env.MIYO_CONFIG,'utf8'));
+  assert.equal(disk.characters[committed.characterId].display.scale,1.7);assert.equal(disk.global.detect.enabled,false);assert.equal(disk.characters[committed.characterId].volume,0.3);
+
+  // Another writer advances the revision; an explicit stale source request must
+  // reload and report the conflict without replaying the old role/global draft.
+  await settings.locator('#scale').fill('2.4');await settings.locator('#scale').dispatchEvent('input');
+  await settings.locator('#volume').fill('0.8');await settings.locator('#volume').dispatchEvent('input');
+  const external=await page.evaluate(async()=>{const c=await window.petHost.getConfig();return window.petHost.saveConfig({characterId:c.characterId,baseRevision:c.revision,patch:{scale:1.2,volume:0.5}});});
+  assert.equal(external.ok,true);
+  await settings.selectOption('#agentProvider','workbuddy');
+  await settings.waitForFunction(()=>document.getElementById('status').textContent.includes('配置已变化，已重新载入'));
+  assert.equal(await settings.locator('#scale').inputValue(),'1.2');assert.equal(await settings.locator('#volume').inputValue(),'0.5');
+  assert.equal(await settings.locator('#agentProvider').inputValue(),'codex');
+  committed=await page.evaluate(()=>window.petHost.getConfig());
+  assert.equal(committed.revision,external.config.revision);assert.equal(committed.agent.activeProvider,'codex');
+  await settings.locator('#save').click();await settings.waitForFunction(()=>document.getElementById('status').textContent.includes('已保存并生效'));
+  disk=JSON.parse(await fs.readFile(env.MIYO_CONFIG,'utf8'));
+  assert.equal(disk.characters[committed.characterId].display.scale,1.2);assert.equal(disk.characters[committed.characterId].volume,0.5);assert.equal(disk.global.agent.activeProvider,'codex');
+
+  // A failed disk write must preserve the draft and restore the committed source
+  // controls; the real config-save handler still performs validation and reports it.
+  await settings.locator('#scale').fill('1.9');await settings.locator('#scale').dispatchEvent('input');
+  await settings.check('#detEnabled');
+  await app.evaluate(({},configPath)=>{
+    const fs=globalThis.fixtureFs,rename=fs.rename;
+    fs.rename=async function(from,to){
+      if(to===configPath){fs.rename=rename;throw Object.assign(new Error('fixture write failure'),{code:'EACCES'});}
+      return rename.call(this,from,to);
+    };
+  },env.MIYO_CONFIG);
+  await settings.selectOption('#agentProvider','workbuddy');
+  await settings.waitForFunction(()=>document.getElementById('status').textContent.includes('保存失败'));
+  assert.equal(await settings.locator('#scale').inputValue(),'1.9');assert.equal(await settings.locator('#detEnabled').isChecked(),true);
+  assert.equal(await settings.locator('#agentProvider').inputValue(),'codex');
+  committed=await page.evaluate(()=>window.petHost.getConfig());
+  assert.equal(committed.scale,1.2);assert.equal(committed.detect.enabled,false);assert.equal(committed.agent.activeProvider,'codex');
+
+  // A general Save queued before the source response must include the successful
+  // source commit instead of replaying the agent snapshot from before that save.
+  await app.evaluate(()=>{globalThis.agentSaveHeld=false;});
+  await settings.selectOption('#agentProvider','workbuddy');
+  await page.waitForFunction(async()=> (await window.petHost.getConfig()).agent.activeProvider==='workbuddy');
+  await settings.locator('#volume').fill('0.6');await settings.locator('#volume').dispatchEvent('input');
+  await settings.locator('#save').click();
+  await app.evaluate(()=>globalThis.releaseAgentSave());
+  await settings.waitForFunction(()=>document.getElementById('status').textContent.includes('已保存并生效'));
+  disk=JSON.parse(await fs.readFile(env.MIYO_CONFIG,'utf8'));
+  assert.equal(disk.global.agent.activeProvider,'workbuddy');assert.equal(disk.global.detect.enabled,true);
+  assert.equal(disk.characters[committed.characterId].display.scale,1.9);assert.equal(disk.characters[committed.characterId].volume,0.6);
+  assert.deepEqual(errors,[]);
+});
+
 test('real Electron stops Agent IO/pushes, resumes, switches sources, and handles normalized rendering',{timeout:60000},async t=>{
   const {_electron}=require(process.env.MIYO_PLAYWRIGHT_MODULE||'playwright-core');
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'miyo-agent-'));
